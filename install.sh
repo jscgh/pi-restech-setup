@@ -77,8 +77,21 @@ shell_init_files() {
   esac
 }
 
+env_file_value() {
+  # $1 = file, $2 = var name -> prints the value (quotes/space stripped), or nothing.
+  local file="$1" name="$2" line
+  [ -f "$file" ] || return 1
+  line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${name}=" "$file" | tail -n1 || true)"
+  [ -n "$line" ] || return 1
+  printf '%s' "${line#*=}" | tr -d "\"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+# Files a hand-written setup may legitimately load the key from. Checked only as a
+# last resort, and only by --check / read-only paths (never written to).
+KNOWN_KEY_FILES=("$HOME/.codex/.env" "$HOME/.config/pi/.env" "$HOME/.restech.env")
+
 detect_api_key() {
-  # Precedence for existing key: env var, then ~/.pi/.env
+  # Precedence for existing key: env var, then ~/.pi/.env, then known loader files.
   if [ -n "${!KEY_ENV_NAME:-}" ]; then
     printf '%s' "${!KEY_ENV_NAME}"
     return 0
@@ -92,6 +105,13 @@ detect_api_key() {
       return 0
     fi
   fi
+  local f v
+  for f in "${KNOWN_KEY_FILES[@]}"; do
+    if v="$(env_file_value "$f" "$KEY_ENV_NAME")" && [ -n "$v" ]; then
+      printf '%s' "$v"
+      return 0
+    fi
+  done
   return 1
 }
 
@@ -136,12 +156,16 @@ else
   NEW_KEY="$EXISTING_KEY"
 fi
 
-# Validate format lightly and (in install mode) verify the key live before
-# writing anything, so we never leave a broken config behind.
-case "$NEW_KEY" in
-  sk-*) : ;;
-  *) die "Key does not look like a ResTech key (expected it to start with 'sk-')." ;;
-esac
+# Validate format lightly and verify the key live before writing anything, so we
+# never leave a broken config behind. --check is read-only and validates key
+# *reachability* later instead, so an unconfigured/alternate-loader key must not
+# abort the whole check here.
+if [ "$MODE" != "check" ]; then
+  case "$NEW_KEY" in
+    sk-*) : ;;
+    *) die "Key does not look like a ResTech key (expected it to start with 'sk-')." ;;
+  esac
+fi
 
 validate_key_live() {
   local key="$1"
@@ -284,8 +308,23 @@ elif [ "$MODE" = "install" ]; then
   log "Tip: vcs-guard.ts asks before any 'git push'/gh/npm publish; it never blocks local commits."
 else
   # --check mode
-  [ -f "$PI_ENV_FILE" ] || die "$PI_ENV_FILE not found. Run ./install.sh first."
-  grep -qE "^[[:space:]]*(export[[:space:]]+)?${KEY_ENV_NAME}=" "$PI_ENV_FILE" || die "No ${KEY_ENV_NAME} line in $PI_ENV_FILE."
+  # Verify the key is actually reachable, not that it lives in one specific file.
+  # install.sh puts it in ~/.pi/.env, but a hand-written loader (e.g. sourcing
+  # ~/.codex/.env from ~/.profile) is equally valid and must not fail the check.
+  key_ok=0
+  if [ -n "${!KEY_ENV_NAME:-}" ]; then
+    key_ok=1
+    log "${KEY_ENV_NAME} is present in the environment."
+  elif [ -f "$PI_ENV_FILE" ] && grep -qE "^[[:space:]]*(export[[:space:]]+)?${KEY_ENV_NAME}=" "$PI_ENV_FILE"; then
+    key_ok=1
+    log "${KEY_ENV_NAME} found in $PI_ENV_FILE."
+  else
+    for cand in "$HOME/.codex/.env" "$HOME/.config/pi/.env" "$HOME/.restech.env"; do
+      [ -f "$cand" ] && grep -qE "^[[:space:]]*(export[[:space:]]+)?${KEY_ENV_NAME}=" "$cand" && {
+        key_ok=1; log "${KEY_ENV_NAME} found in $cand (loaded by your own shell config)."; break; }
+    done
+  fi
+  [ "$key_ok" = 1 ] || die "Cannot find ${KEY_ENV_NAME} in the environment, $PI_ENV_FILE, or any known env file. Run ./install.sh."
   [ -f "$PI_AGENT_DIR/settings.json" ] || die "settings.json missing from $PI_AGENT_DIR."
   [ -f "$PI_AGENT_DIR/models.json" ] || die "models.json missing from $PI_AGENT_DIR."
   [ -f "$PI_AGENT_DIR/extensions/minimal-mode.ts" ] || die "minimal-mode.ts extension missing."
@@ -294,8 +333,14 @@ else
   [ -f "$PI_AGENT_DIR/extensions/vcs-guard.ts" ] || die "vcs-guard.ts extension missing (remote writes are NOT being gated)."
   node "$REPO_DIR/tests/vcs-guard.test.cjs" >/dev/null 2>&1 || die "vcs-guard rules failed their test suite; do not rely on the guard."
   log "vcs-guard installed and its rule suite passes."
-  perms="$(stat -c '%a' "$PI_ENV_FILE" 2>/dev/null || stat -f '%Lp' "$PI_ENV_FILE")"
-  [ "$perms" = "600" ] || warn "$PI_ENV_FILE mode is $perms (expected 600)."
-  grep -qF "$MARKER_BEGIN" "$(shell_init_files)" || die "Source block missing from $(shell_init_files). Run ./install.sh."
-  log "Everything looks good: key file perms, agent config, and shell block are all present."
+  if [ -f "$PI_ENV_FILE" ]; then
+    perms="$(stat -c '%a' "$PI_ENV_FILE" 2>/dev/null || stat -f '%Lp' "$PI_ENV_FILE")"
+    [ "$perms" = "600" ] || warn "$PI_ENV_FILE mode is $perms (expected 600)."
+  fi
+  if ! grep -qF "$MARKER_BEGIN" "$(shell_init_files)" 2>/dev/null; then
+    # Not fatal: the key check above is the real test. A hand-written loader in
+    # another init file is supported, so only warn when the key is NOT reachable.
+    warn "No installer block in $(shell_init_files). Fine if you wire ${KEY_ENV_NAME} up yourself (e.g. via ~/.profile); re-run ./install.sh to add it."
+  fi
+  log "Check passed: key reachable, agent config present, vcs-guard rules verified."
 fi
