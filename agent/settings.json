@@ -13,5 +13,14 @@
     "restech/qwen3.8-27b",
     "restech/glm-5.3-flash"
   ],
-  "hideThinkingBlock": true
+  "hideThinkingBlock": true,
+  "defaultThinkingLevel": "medium",
+  "modelThinkingLevels": {
+    "openai-codex/gpt-5.6-luna": "low",
+    "openai-codex/gpt-5.6-sol": "low",
+    "openai-codex/gpt-5.6-terra": "low",
+    "restech/qwen3.8-flash-next": "medium",
+    "restech/qwen3.8-27b": "medium",
+    "restech/glm-5.3-flash": "high"
+  }
 }

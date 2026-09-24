@@ -12,7 +12,15 @@
           "input": ["text", "image"],
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 1048576,
-          "maxTokens": 32768
+          "maxTokens": 32768,
+          "compat": {
+            "supportsReasoningEffort": true,
+            "thinkingFormat": "qwen"
+          },
+          "thinkingLevelMap": {
+            "off": null, "minimal": "minimal", "low": "low", "medium": "medium",
+            "high": "high", "xhigh": "xhigh", "max": "max"
+          }
         },
         {
           "id": "qwen3.8-27b",
@@ -24,8 +32,13 @@
           "maxTokens": 32768,
           "compat": {
             "supportsDeveloperRole": false,
-            "supportsReasoningEffort": false,
-            "maxTokensField": "max_tokens"
+            "supportsReasoningEffort": true,
+            "maxTokensField": "max_tokens",
+            "thinkingFormat": "qwen"
+          },
+          "thinkingLevelMap": {
+            "off": null, "minimal": "minimal", "low": "low", "medium": "medium",
+            "high": "high", "xhigh": "xhigh", "max": "max"
           }
         },
         {
@@ -35,7 +48,15 @@
           "input": ["text", "image"],
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 1048576,
-          "maxTokens": 32768
+          "maxTokens": 32768,
+          "compat": {
+            "supportsReasoningEffort": true,
+            "thinkingFormat": "qwen"
+          },
+          "thinkingLevelMap": {
+            "off": null, "minimal": "minimal", "low": "low", "medium": "medium",
+            "high": "high", "xhigh": "xhigh", "max": "max"
+          }
         }
       ]
     }
