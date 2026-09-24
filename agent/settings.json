@@ -1,0 +1,17 @@
+{
+  "theme": "dark",
+  "defaultProvider": "restech",
+  "defaultModel": "qwen3.8-flash-next",
+  "packages": [
+    "npm:@tintinweb/pi-subagents@0.7.3"
+  ],
+  "enabledModels": [
+    "openai-codex/gpt-5.6-luna",
+    "openai-codex/gpt-5.6-sol",
+    "openai-codex/gpt-5.6-terra",
+    "restech/qwen3.8-flash-next",
+    "restech/qwen3.8-27b",
+    "restech/glm-5.3-flash"
+  ],
+  "hideThinkingBlock": true
+}
