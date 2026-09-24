@@ -9,3 +9,14 @@ sessions/
 
 # node/installer cruft
 node_modules/
+
+# installer backups & editor/CLI detritus -- these are per-machine, never shared
+.backup-*/
+*.bak
+*.orig
+*.rej
+*~
+
+# local-only prototypes: kept out of the shared template until they are
+# deliberately promoted (pi reads skills/ from the agent dir, not this repo)
+agent/skills/

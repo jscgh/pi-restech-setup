@@ -16,7 +16,7 @@ Includes:
 | `agent/agents/*.md` | named subagents: Qwen/GLM workers + reviewers, frontier escalation |
 | `agent/prompts/*.md` | slash prompt templates (implement, review, escalate) |
 | `agent/extensions/minimal-mode.ts` | Codex-style collapsed tool rows (one line per call, Ctrl+O expands) |
-| `agent/extensions/notify.ts` | desktop/terminal notification when the agent waits for input (OSC 777/99 + BEL, tmux-safe over ssh) |
+| `package/pi-notify/` | **installable pi package**: desktop notification when the agent waits for input. Freedesktop session bus first, so it works on GNOME Terminal/VTE, Ghostty and VS Code alike; OSC 777/99 + BEL only as a no-bus fallback; tmux-safe over ssh. Ghostty users may prefer its native `notify-on-command-finish` -- see `package/pi-notify/README.md` |
 | `agent/extensions/vcs-guard.ts` | **hard gate**: confirms before any remote write (`git push`, `gh pr create`, `npm publish`, `kubectl apply`, …); blocks edits to guard-critical config |
 | `agent/AGENTS.md` | repo etiquette: no unprompted pushes, commits allowed but not preferred, verification before publishing |
 | `tests/vcs-guard.test.cjs` | regression suite for the guard (52 block/allow cases). Run: `node tests/vcs-guard.test.cjs` |
@@ -49,8 +49,35 @@ The script will:
 - install the `pi-subagents` extension package
 - run an end-to-end smoke test against the gateway
 
-Re-running is safe. Nothing outside `~/.pi/agent/`, `~/.pi/.env`, and the
-marked shell-init block is touched.
+Re-running is safe and is also **how you update**: `git pull && ./install.sh`
+re-copies shared config, tops up missing packages (and now **aborts if pi-notify
+is not actually loadable**, rather than reporting success), and runs `pi update`
+to stay on the latest public pi (disable with `--no-update-pi` or
+`PI_SETUP_NO_UPDATE_PI=1`; restart pi afterwards to run a new build). Package
+updates are independent; disable them with `--no-update-packages` or
+`PI_SETUP_NO_UPDATE_PACKAGES=1`.
+
+Nothing outside `~/.pi/agent/`, `~/.pi/.env`, and the marked shell-init block is
+touched.
+
+### Personal files are never overwritten
+
+`AGENTS.md` and `settings.json` are treated as **yours**. The installer keeps
+your copy, leaves a one-time `~/.pi/agent/<file>.bak` of it, and reports the
+delta instead of clobbering:
+
+```
+[pi-setup] AGENTS.md is personal & differs from template (kept yours).
+```
+
+That is deliberate — conciseness rules, model preferences, and installed
+packages differ per person, and `pi` itself writes state into `settings.json`
+(`lastChangelogVersion`, `packages`). So there is no template drift: to adopt a
+new template line, copy it in by hand after reading the diff. Override the list
+with `PI_SETUP_PERSONAL_FILES="settings.json"` to protect only one of them, or
+`PI_SETUP_PERSONAL_FILES=""` to have the installer enforce the template for both
+(the latter overwrites your copies, after backing them up). Names match on
+basename at any depth, so do not add a shared `prompts/AGENTS.md`.
 
 Check an existing install without changing anything:
 
@@ -160,7 +187,12 @@ Add a rule here whenever you add one.
 ## Uninstall
 
 ```bash
-rm ~/.pi/agent/extensions/minimal-mode.ts ~/.pi/agent/extensions/notify.ts
+rm ~/.pi/agent/extensions/minimal-mode.ts
+pi uninstall git:github.com/jscgh/pi-restech-setup
+
+`pi install git:github.com/jscgh/pi-restech-setup` installs notify through the
+root `package.json`, which explicitly exposes the nested extension. A local
+`pi install <repo>/package/pi-notify` also works but symlinks the checkout.
 # restore your previous agent config if the installer backed one up:
 ls ~/.pi/agent/.backup-*
 # remove the key + shell block by hand:
