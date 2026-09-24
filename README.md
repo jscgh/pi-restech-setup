@@ -17,6 +17,9 @@ Includes:
 | `agent/prompts/*.md` | slash prompt templates (implement, review, escalate) |
 | `agent/extensions/minimal-mode.ts` | Codex-style collapsed tool rows (one line per call, Ctrl+O expands) |
 | `agent/extensions/notify.ts` | desktop/terminal notification when the agent waits for input (OSC 777/99 + BEL, tmux-safe over ssh) |
+| `agent/extensions/vcs-guard.ts` | **hard gate**: confirms before any remote write (`git push`, `gh pr create`, `npm publish`, `kubectl apply`, …); blocks edits to guard-critical config |
+| `agent/AGENTS.md` | repo etiquette: no unprompted pushes, commits allowed but not preferred, verification before publishing |
+| `tests/vcs-guard.test.cjs` | regression suite for the guard (52 block/allow cases). Run: `node tests/vcs-guard.test.cjs` |
 
 ## Prerequisites
 
@@ -100,6 +103,51 @@ Startup levels are pinned per model in `settings.json`:
 
 Override for one session with `/thinking` (press `Ctrl+S` there to save it as
 that model's default, which rewrites `modelThinkingLevels`).
+
+## Safety rails: no pushes without your say-so
+
+Pi has **no built-in permission system** — `docs/how-pi-works.md` is explicit that
+tools run with the OS permissions of the Pi process. So the "never push without
+approval" rule is enforced mechanically by `agent/extensions/vcs-guard.ts`, not
+merely requested in a prompt. A `tool_call` handler is the only choke point that
+also covers **subagents**, which is where the real risk sits: an autonomous worker
+"helpfully" pushing on completion.
+
+| | |
+| --- | --- |
+| **Asks for confirmation** | `git push` (any form), `gh`/`glab`/`hub`/`arc` mutating subcommands, `gh api -X POST\|PUT\|PATCH\|DELETE`, `npm\|pnpm\|yarn\|cargo\|uv publish`, `twine upload`, `mvn\|gradle deploy`, `docker\|podman push`, `kubectl apply\|delete`, `terraform apply\|destroy`, `helm install\|upgrade`, `aws/gcloud create\|delete`, `curl`/`wget` write requests |
+| **Blocked outright** | writes to shell init files, `~/.pi/.env`, `~/.pi/agent/{settings,models,auth}.json`, `~/.pi/agent/extensions/`, `~/.ssh/`, `.git-credentials` — i.e. anything the agent could use to weaken the guard or exfiltrate a key |
+| **Always allowed** | `git commit`/`add`/`status`/`diff`/`log`/`fetch`/`pull`/`checkout`/`branch`/`stash`/`rebase`/`reset`/`cherry-pick`/`tag`/`worktree`, read-only `gh pr view`, `gh api -X GET`, and all normal builds/tests |
+
+When there is no UI (RPC, CI, `--print`), flagged commands are **blocked rather
+than allowed** — the handler fails closed.
+
+Escapes:
+
+```bash
+PI_VCS_GUARD=off pi        # disable the extension for one session
+PI_VCS_ALLOW_PUSH=1 pi     # allow remote writes without prompting
+```
+
+Two honest limitations. It pattern-matches **command text**, so a wrapper script
+that pushes, a shell alias, or `xargs git push` can slip through — it is a
+seatbelt, not a sandbox, so keep branch protection on `main`. And it is a
+**denylist**, which is the weaker of the two designs; a default-deny approach
+that allowedlisted known-safe commands instead would be stronger but would nag
+on every unfamiliar CLI.
+
+### Verifying it
+
+```bash
+node tests/vcs-guard.test.cjs
+```
+
+The suite loads `RULES` straight out of the shipped `.ts` (no duplicated table to
+drift) and asserts every case above. It earns its keep: during development an
+`ARG` regex of `\s+\S+` instead of `\s+` silently consumed the subcommand word
+and disabled **every** `gh`/`glab`/`npm`/`cargo` rule while the extension still
+loaded cleanly. The git-push cases still passed, so only the suite caught it.
+Add a rule here whenever you add one.
 
 ## Security notes
 
