@@ -281,6 +281,7 @@ elif [ "$MODE" = "install" ]; then
   log "Done (smoke test skipped). Open a NEW shell (or: source $INIT_FILE) and run 'pi' to start."
   log "Tip: pi --model restech/qwen3.8-flash-next   (recommended default)"
   log "Tip: Ctrl+O toggles tool output expand/collapse in pi."
+  log "Tip: vcs-guard.ts asks before any 'git push'/gh/npm publish; it never blocks local commits."
 else
   # --check mode
   [ -f "$PI_ENV_FILE" ] || die "$PI_ENV_FILE not found. Run ./install.sh first."
@@ -288,6 +289,11 @@ else
   [ -f "$PI_AGENT_DIR/settings.json" ] || die "settings.json missing from $PI_AGENT_DIR."
   [ -f "$PI_AGENT_DIR/models.json" ] || die "models.json missing from $PI_AGENT_DIR."
   [ -f "$PI_AGENT_DIR/extensions/minimal-mode.ts" ] || die "minimal-mode.ts extension missing."
+  # The guard is a safety control, so a silent failure to install it is worth a
+  # hard stop rather than a note -- without it, remote writes are unpoliced.
+  [ -f "$PI_AGENT_DIR/extensions/vcs-guard.ts" ] || die "vcs-guard.ts extension missing (remote writes are NOT being gated)."
+  node "$REPO_DIR/tests/vcs-guard.test.cjs" >/dev/null 2>&1 || die "vcs-guard rules failed their test suite; do not rely on the guard."
+  log "vcs-guard installed and its rule suite passes."
   perms="$(stat -c '%a' "$PI_ENV_FILE" 2>/dev/null || stat -f '%Lp' "$PI_ENV_FILE")"
   [ "$perms" = "600" ] || warn "$PI_ENV_FILE mode is $perms (expected 600)."
   grep -qF "$MARKER_BEGIN" "$(shell_init_files)" || die "Source block missing from $(shell_init_files). Run ./install.sh."
