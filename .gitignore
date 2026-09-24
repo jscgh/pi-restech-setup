@@ -1,0 +1,11 @@
+# never commit credentials
+.env
+*.env
+auth.json
+models-store.json
+
+# never commit chat history
+sessions/
+
+# node/installer cruft
+node_modules/
