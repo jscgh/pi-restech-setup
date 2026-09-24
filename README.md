@@ -82,6 +82,25 @@ pi --model restech/qwen3.8-27b          # general purpose
 | `qwen3.8-27b` | High quality | General-purpose chat/reasoning. 27B, federated node. |
 | `glm-5.3-flash` | Deep reasoning | 320B MoE (A18B). Strongest, but shares one node with the qwen replicas — occasionally 503s under load. |
 
+### Thinking levels
+
+The endpoint accepts `reasoning_effort` in
+`none|minimal|low|medium|high|xhigh|max` on all three ResTech models, so
+`models.json` declares a full `thinkingLevelMap` for each. Without that map Pi
+hides `xhigh`/`max` and collapses `low`/`medium`/`high` onto one token budget —
+if you add a model, copy the map.
+
+Startup levels are pinned per model in `settings.json`:
+
+| Model | Default | Why |
+| --- | --- | --- |
+| `qwen3.8-flash-next`, `qwen3.8-27b` | `medium` | Levels barely separate below `high`; `medium` is the cheaper default for agent loops. |
+| `glm-5.3-flash` | `high` | `low`/`medium` collapse its thinking to near-zero tokens. Do not drop it. |
+| `openai-codex/*` | `low` | ChatGPT quota is finite — raise per session only when needed. |
+
+Override for one session with `/thinking` (press `Ctrl+S` there to save it as
+that model's default, which rewrites `modelThinkingLevels`).
+
 ## Security notes
 
 - Your `sk-…` key is stored **only** in `~/.pi/.env` (mode 600) and exported
