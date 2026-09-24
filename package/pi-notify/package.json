@@ -1,0 +1,14 @@
+{
+  "name": "pi-notify",
+  "version": "0.1.0",
+  "description": "Desktop + terminal notifications when the Pi agent finishes and waits for input",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": ["./extensions/notify.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

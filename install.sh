@@ -16,30 +16,41 @@
 #      interactive shells (and therefore pi, subagents, and the
 #      documented ResTech quickstarts) pick the key up from the
 #      environment.
-#   5. Copies this repo's agent/ config into ~/.pi/agent/ (backing up
-#      any files it replaces into ~/.pi/agent/.backup-<timestamp>/).
-#   6. Installs the pi-subagents package if missing.
+#   5. Copies shared agent config into ~/.pi/agent/ with backups; personal
+#      AGENTS.md and settings.json are installed once and never overwritten.
+#   6. Updates pi to the latest public release and installs/updates packages.
 #   7. Runs a live smoke test against the gateway.
 #
-# Nothing outside ~/.pi/agent and the one appended shell-init line is
-# modified. Re-running is safe (idempotent).
+# Writes only below ~/.pi/agent, ~/.pi/.env, and the marked shell-init block.
+# Re-running is safe (idempotent). Use --no-update-pi and/or
+# --no-update-packages to pin installed software for one run.
 #
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="${PI_SETUP_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 PI_AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+# Normalize a caller-supplied trailing slash so the overlap guard cannot be
+# bypassed by spelling the same directory as ~/.pi/agent/.
+PI_AGENT_DIR="${PI_AGENT_DIR%/}"
 PI_ENV_FILE="$HOME/.pi/.env"
 MARKER_BEGIN="# >>> pi-restech-setup >>>"
 MARKER_END="# <<< pi-restech-setup <<<"
 KEY_ENV_NAME="RESTECH_API_KEY"
 KEY_URL_HINT="https://inference.restech.unsw.edu.au/ (Request access)"
 
+STAMP="$(date +%Y%m%d-%H%M%S)"   # single timestamp for every backup this run
 MODE="install"
 FORCE_KEY=0
 VALIDATE=1
+UPDATE_PI=1
+UPDATE_PACKAGES=1
+[ "${PI_SETUP_NO_UPDATE_PI:-}" = "1" ] && UPDATE_PI=0
+[ "${PI_SETUP_NO_UPDATE_PACKAGES:-}" = "1" ] && UPDATE_PACKAGES=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) MODE="check" ;;
+    --no-update-pi) UPDATE_PI=0 ;;
+    --no-update-packages) UPDATE_PACKAGES=0 ;;
     --force-key) FORCE_KEY=1 ;;
     --no-validate) VALIDATE=0 ;;
     -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -241,10 +252,32 @@ if [ "$MODE" = "install" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 4b. Safety guards -- evaluated before any config is copied
+# ---------------------------------------------------------------------------
+
+# Hard stop if the repo/agent trees overlap: an odd REPO_DIR (e.g. the script
+# invoked via `bash -c` from inside the agent dir) would otherwise copy
+# $PI_AGENT_DIR onto itself and silently revert personal files like AGENTS.md.
+case "$REPO_DIR/agent" in
+  "$PI_AGENT_DIR"|"$PI_AGENT_DIR"/*) die "REPO_DIR ($REPO_DIR) is inside $PI_AGENT_DIR -- refusing to sync." ;;
+esac
+case "$PI_AGENT_DIR" in
+  "$REPO_DIR/agent"/*) die "PI_AGENT_DIR ($PI_AGENT_DIR) is inside the source tree -- refusing to sync." ;;
+esac
+[ -d "$REPO_DIR/agent" ] || die "REPO_DIR ($REPO_DIR) has no agent/ dir -- is this the pi-restech-setup repo?"
+  # Only meaningful on the install path: --check must not warn about a package
+  # dir that a read-only verification of an already-working install never uses.
+  if [ "$MODE" = "install" ]; then
+    if [ ! -d "$REPO_DIR/package/pi-notify" ]; then
+      warn "$REPO_DIR/package/pi-notify missing; pi-notify cannot be installed from this checkout."
+    fi
+  fi
+
+# ---------------------------------------------------------------------------
 # 5. Copy agent config into ~/.pi/agent/ (backup-then-copy, per file)
 # ---------------------------------------------------------------------------
 copy_tree() {
-  local src_root="$1" dst_root="$2" rel
+  local src_root="$1" dst_root="$2" rel src dst bak
   mkdir -p "$dst_root"
   while IFS= read -r -d '' rel; do
     local src="$src_root/$rel" dst="$dst_root/$rel"
@@ -253,32 +286,180 @@ copy_tree() {
       if cmp -s "$src" "$dst"; then
         continue
       fi
-      local bak="$dst_root/.backup-$STAMP"
-      mkdir -p "$bak"
-      cp -p "$dst" "$bak/$rel"
-      log "Backed up existing $(echo "$dst" | sed "s|$dst_root/||") -> $bak/$rel"
+      # NB: `bak` is declared with the other locals, and we mkdir its *dirname*
+      # rather than `$bak` itself. The original code did `local
+      # bak="$dst_root/.backup-$STAMP"; mkdir -p "$bak"; cp "$dst" "$bak/$rel"`,
+      # which for a nested rel (e.g. extensions/vcs-guard.ts) tried to write into
+      # a `.backup-<STAMP>/extensions/` subdirectory that was never created:
+      #   cp: cannot create regular file '.../.backup-TEST/extensions/vcs-guard.ts':
+      #       No such file or directory
+      # and under `set -e` that aborted the install mid-copy -- top-level files
+      # already done, the nested one left stale AND unbacked. (Reproduced against
+      # the verbatim original function.)
+      # NOT the cause, despite how it reads: `local` inside an `if` block does
+      # persist for the rest of the *function* scope, so `bak` was never unset.
+      bak="$dst_root/.backup-$STAMP/$rel"
+      mkdir -p "$(dirname "$bak")"
+      cp -p "$dst" "$bak"
+      log "Backed up existing ${rel} -> $bak"
     fi
     cp -p "$src" "$dst"
     log "Installed $(echo "$dst" | sed "s|$dst_root/||")"
-  done < <(cd "$src_root" && find . -type f -print0 | sed -z 's|^\./||')
+  done < <(
+    cd "$src_root"
+    # Strip ./ without GNU-only `sed -z`; this remains NUL-safe.
+    while IFS= read -r -d '' found; do printf '%s\0' "${found#./}"; done \
+      < <(find . -type f -print0) | excluded_files
+  )
+}
+
+# ---------------------------------------------------------------------------
+# 4b. Personal files: never overwrite, and never install a stale template over
+#     a live config. Anything the user may customise belongs in this list.
+#     AGENTS.md is per-person etiquette; settings.json is where pi itself writes
+#     state (lastChangelogVersion) and where `pi install` records packages --
+#     copying the template over it would silently unregister pi-notify.
+# ---------------------------------------------------------------------------
+PERSONAL_FILES="${PI_SETUP_PERSONAL_FILES:-AGENTS.md settings.json}"
+
+
+is_personal() {
+  local rel="$1" pf base
+  for pf in $PERSONAL_FILES; do
+    # Exact relative paths only. Basename matching silently excluded future
+    # shared files such as prompts/AGENTS.md.
+    [ "$rel" = "$pf" ] && return 0
+  done
+  return 1
+}
+
+# Drop excluded entries from the find stream (NUL-delimited).
+excluded_files() {
+  local rel
+  while IFS= read -r -d '' rel; do
+    is_personal "$rel" || printf '%s\0' "$rel"
+  done
+}
+
+install_personal_file() {
+  local pf_rel="$1" src dst
+  [ -n "$pf_rel" ] || return 0
+  src="$REPO_DIR/agent/$pf_rel"; dst="$PI_AGENT_DIR/$pf_rel"
+  [ -f "$src" ] || return 0
+  if [ ! -f "$dst" ]; then
+    mkdir -p "$(dirname "$dst")"
+    if [ -f "$dst.bak" ]; then
+      cp -p "$dst.bak" "$dst"
+      log "Restored your $pf_rel from $dst.bak (template not applied)."
+    else
+      cp -p "$src" "$dst"
+      log "Installed $pf_rel (first time; now yours to keep)."
+    fi
+  elif cmp -s "$src" "$dst"; then
+    log "$pf_rel unchanged."
+  else
+    # Keep ONE pristine copy of the user's file (never overwritten), so they can
+    # always recover their original even after many runs, and tell them how to
+    # inspect the delta against the template.
+    [ -f "$dst.bak" ] || cp -p "$dst" "$dst.bak" 2>/dev/null || true
+    log "$pf_rel differs from the template -> kept yours. See: diff '$REPO_DIR/agent/$pf_rel' '$dst'"
+  fi
 }
 
 if [ "$MODE" = "install" ]; then
-  STAMP="$(date +%Y%m%d-%H%M%S)"
+  for pf_ in $PERSONAL_FILES; do install_personal_file "$pf_"; done
+fi
+
+if [ "$MODE" = "install" ]; then
   copy_tree "$REPO_DIR/agent" "$PI_AGENT_DIR"
   # Never clobber a coworker's auth.json or models-store.json (regenerable cache).
   log "Config installed into $PI_AGENT_DIR"
 fi
 
 # ---------------------------------------------------------------------------
-# 6. pi-subagents package
+# 5b. Keep pi itself on the latest public release
 # ---------------------------------------------------------------------------
+# pi is a *managed* install (see ~/.pi/agent/install/managed-install.json), so
+# the supported way to move versions is `pi update` -- never npm install -g,
+# which would fight the releases-v1 layout and the ~/.local/bin/pi symlink.
+#
+# Off-switches, because auto-updating the tool an agent is currently driving is
+# a real hazard (docs: cli.md "pi update"):
+#   ./install.sh --no-update-pi      one run
+#   PI_SETUP_NO_UPDATE_PI=1          persistent, for people pinned to a version
+#   PI_NOTIFY... (unrelated)         package-level switches live below
+if [ "$MODE" = "install" ]; then
+  if [ "$UPDATE_PI" = "1" ]; then
+    before="$(pi --version 2>/dev/null | tail -n1 | tr -d '[:space:]' || true)"
+    log "Updating pi (currently ${before:-unknown})..."
+    update_out=""
+    if update_out="$(pi update 2>&1)"; then
+      [ -z "$update_out" ] || printf '%s\n' "$update_out"
+      after="$(pi --version 2>/dev/null | tail -n1 | tr -d '[:space:]' || true)"
+      if [ -n "$after" ] && [ "$after" != "$before" ]; then
+        log "pi updated ${before:-?} -> ${after:-?}. Restart pi to run the new build."
+      elif [ "$after" = "$before" ] && [ -n "$after" ]; then
+        log "pi already at latest (${after})."
+      else
+        warn "Could not confirm pi version after update (got '${after:-empty}')."
+      fi
+    else
+      [ -z "$update_out" ] || printf '%s\n' "$update_out" >&2
+      warn "'pi update' failed; leaving pi at ${before:-unknown} (offline?). Continuing."
+    fi
+  else
+    log "Skipping pi self-update (--no-update-pi)."
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 6. pi packages
+# ---------------------------------------------------------------------------
+# `pi install` can print success for a git clone that contains no discoverable
+# extension. Validate the installed package path and its manifest, not the
+# source label alone.
+notify_package_registered() {
+  local path manifest
+  while IFS= read -r path; do
+    path="${path#    }"
+    [ -d "$path" ] || continue
+    manifest="$path/package.json"
+    [ -f "$manifest" ] || continue
+    if grep -q 'package/pi-notify/extensions/notify.ts\|extensions/notify.ts' "$manifest"; then
+      return 0
+    fi
+  done < <(pi list 2>/dev/null | grep '^    /' || true)
+  return 1
+}
+
 if [ "$MODE" = "install" ]; then
   if pi list 2>/dev/null | grep -q "pi-subagents"; then
     log "pi-subagents already installed."
   else
     log "Installing pi-subagents package..."
     pi install npm:@tintinweb/pi-subagents@0.7.3
+  fi
+
+  # The root package.json explicitly declares the nested notify entry point,
+  # so a normal git install is now supported. This was verified in a fresh pi
+  # process: one agent settle produced exactly one D-Bus Notify frame.
+  PI_NOTIFY_SOURCE="${PI_NOTIFY_SOURCE:-git:github.com/jscgh/pi-restech-setup}"
+  if notify_package_registered; then
+    log "pi-notify already installed."
+  else
+    log "Installing pi-notify from $PI_NOTIFY_SOURCE ..."
+    if ! pi install "$PI_NOTIFY_SOURCE"; then
+      die "pi install '$PI_NOTIFY_SOURCE' failed."
+    fi
+    notify_package_registered \
+      || die "pi installed '$PI_NOTIFY_SOURCE' but its manifest exposes no notify extension."
+  fi
+
+  # Package updates are independent from the pi binary update/pin decision.
+  if [ "$UPDATE_PACKAGES" = "1" ]; then
+    pi update --extensions || warn "Could not refresh installed pi packages."
+  else
+    log "Skipping package updates (--no-update-packages)."
   fi
 fi
 
@@ -327,7 +508,35 @@ else
   [ "$key_ok" = 1 ] || die "Cannot find ${KEY_ENV_NAME} in the environment, $PI_ENV_FILE, or any known env file. Run ./install.sh."
   [ -f "$PI_AGENT_DIR/settings.json" ] || die "settings.json missing from $PI_AGENT_DIR."
   [ -f "$PI_AGENT_DIR/models.json" ] || die "models.json missing from $PI_AGENT_DIR."
+  # Personal files are never overwritten, so tell the user when their copy has
+  # drifted from the template (they may want the new bits by hand).
+  for pf_ in $PERSONAL_FILES; do
+    if [ -f "$REPO_DIR/agent/$pf_" ] && [ -f "$PI_AGENT_DIR/$pf_" ]; then
+      if cmp -s "$REPO_DIR/agent/$pf_" "$PI_AGENT_DIR/$pf_"; then
+        log "$pf_ matches the template."
+      else
+        log "$pf_ is personal & differs from template (kept yours). Diff: diff '$REPO_DIR/agent/$pf_' '$PI_AGENT_DIR/$pf_'"
+      fi
+    fi
+  done
+
   [ -f "$PI_AGENT_DIR/extensions/minimal-mode.ts" ] || die "minimal-mode.ts extension missing."
+
+  # Check the installed manifest, not a display name: pi can register an empty
+  # git clone and still print "Installed".
+  notify_pkg=0
+  notify_package_registered && notify_pkg=1
+  notify_file=0
+  [ -f "$PI_AGENT_DIR/extensions/notify.ts" ] && notify_file=1
+  if [ "$notify_pkg" -eq 1 ] && [ "$notify_file" -eq 1 ]; then
+    warn "pi-notify is installed BOTH as a package and as $PI_AGENT_DIR/extensions/notify.ts -- you will get two banners. Delete the file."
+  elif [ "$notify_pkg" -eq 0 ] && [ "$notify_file" -eq 0 ]; then
+    die "pi-notify is not installed -- agent-finished notifications will not fire."
+  else
+    log "pi-notify present (package=$notify_pkg, file=$notify_file)."
+    grep -q "PI_NOTIFY_DISABLE" "$HOME/.bashrc" 2>/dev/null || \
+      log "Tip: for scripted 'pi -p' use, set PI_NOTIFY_DISABLE=1 (banners would pop)."
+  fi
   # The guard is a safety control, so a silent failure to install it is worth a
   # hard stop rather than a note -- without it, remote writes are unpoliced.
   [ -f "$PI_AGENT_DIR/extensions/vcs-guard.ts" ] || die "vcs-guard.ts extension missing (remote writes are NOT being gated)."
