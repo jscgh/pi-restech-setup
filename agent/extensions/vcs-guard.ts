@@ -1,70 +1,23 @@
-/**
- * VCS Guard — hard gate on remote-mutating commands.
- *
- * Why an extension and not a setting: Pi has no built-in permission system
- * (docs/how-pi-works.md: tools run with the OS permissions of the Pi process),
- * and `defaultTools` is bypassed by extension and SDK tools — which includes the
- * subagents' exec/Agent tools. A `tool_call` handler is the only choke point that
- * covers subagents too, and a `tool_call` handler that *throws* blocks the tool as
- * a fail-safe, so a broken matcher fails closed rather than open.
- *
- * Policy:
- *   NEVER (blocked outright, no prompt):
- *     - writes to shell init files, ~/.pi/.env, and Pi credential/settings files
- *   CONFIRM (interactive prompt; blocked when there is no UI, e.g. RPC/CI):
- *     - git push / send-email / filter-branch / cvsexportcommit
- *     - gh, glab, hub, arc/cr mutating subcommands; `gh api -X POST|PUT|PATCH|DELETE`
- *     - npm|pnpm|yarn|deno|cargo|uv publish, twine|maturin upload,
- *       mvn|gradle|sbt deploy|release, docker|podman|oras|nerdctl push, helm push
- *     - kubectl apply|delete|…, terraform apply|destroy, helm install|upgrade|…,
- *       aws/gcloud create|delete|put|update
- *     - curl/wget performing POST/PUT/PATCH/DELETE (covers raw REST publishing)
- *   ALLOWED (local work is unimpeded):
- *     - git commit/add/status/diff/log/fetch/pull/checkout/branch/stash/rebase/
- *       reset/cherry-pick/tag/worktree/rm
- *     - read-only gh/glab (`gh pr view`, `gh issue list`, `gh api -X GET`, …)
- *     - all other bash, plus read/edit/write/grep/find/ls
- *
- * Escapes:
- *   PI_VCS_GUARD=off pi          # disable this extension entirely
- *   PI_VCS_ALLOW_PUSH=1 pi       # allow pushes without prompting (loud warning)
- *   PI_VCS_PROTECTED_FILES="…"   # extra regexes for the never-write list
- *
- * Limits: this pattern-matches command text. A wrapper script that pushes, an
- * alias, or `xargs git push` can slip through. It is a seatbelt plus a prompt,
- * not a sandbox — pair it with branch protection for anything you care about.
- */
+/** Confirm remote writes and block writes to guard-critical files. */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-/**
- * Match a subcommand token with explicit punctuation boundaries instead of \b.
- * \b treats `-` and `.` as word boundaries, so `\bpush\b` wrongly matched the
- * filename `git-push.md`, and `\b(create|…)\b` wrongly matched `--force-with-lease`.
- */
+// Explicit boundaries avoid matching names such as git-push.md.
 const tok = (w: string) => String.raw`(?<![A-Za-z0-9._-])(?:${w})(?![A-Za-z])`;
 
-/**
- * Exactly one whitespace-delimited token, so a rule can only reach the *next* word
- * and cannot skip across unrelated arguments (`gh pr view --repo x/create` stays
- * allowed). Must be `\s+`, not `\s+\S+`: the latter consumes the subcommand word
- * itself and then fails, silently disabling every gh/glab/npm/cargo rule.
- */
+// Restrict subcommand matching to the next argument.
 const ARG = String.raw`\s+`;
 
-/** Same-line span that stops before the next whitespace-delimited token. */
 const STAY = "[^\\n;|&]*?";
 
 type Rule = { re: RegExp; why: string };
 
 const RULES: Rule[] = [
-	// ---- git ----------------------------------------------------------------
 	{ re: new RegExp(`${tok("git")}${STAY}${tok("push")}`), why: "git push writes to the remote" },
 	{ re: new RegExp(`${tok("git")}${STAY}${tok("send-email")}`), why: "git send-email publishes patches" },
 	{ re: new RegExp(`${tok("git")}${STAY}${tok("filter-branch")}`), why: "git filter-branch rewrites history" },
 	{ re: new RegExp(`${tok("git")}${STAY}${tok("cvsexportcommit")}`), why: "git cvsexportcommit publishes" },
 
-	// ---- GitHub / GitLab CLIs: verb must sit in its own argument slot ---------
 	{
 		re: new RegExp(`${tok("gh")}${ARG}${tok("pr|release|repo")}${ARG}${tok("create|merge|close|delete|edit|review|comment|publish|enable|disable|rerun")}`),
 		why: "gh mutates a hosted repository",
@@ -78,8 +31,6 @@ const RULES: Rule[] = [
 		why: "gh api performs a write request",
 	},
 	{
-		// `workflow run` dispatches a build; `run cancel` stops one. Both mutate the
-		// hosted repo. `view`/`list`/`watch` are deliberately absent -- read-only.
 		re: new RegExp(`${tok("gh")}${ARG}${tok("workflow|run")}${ARG}${tok("run|cancel|disable|enable")}`),
 		why: "gh dispatches or cancels a workflow run",
 	},
@@ -94,7 +45,6 @@ const RULES: Rule[] = [
 	{ re: new RegExp(`${tok("hub")}${STAY}${tok("pull-request")}`), why: "hub opens a pull request" },
 	{ re: new RegExp(`${tok("arc|cr")}${ARG}${tok("diff|land|submit")}`), why: "Phabricator/arcanist publishes a revision" },
 
-	// ---- package / artifact publication --------------------------------------
 	{ re: new RegExp(`${tok("npm|pnpm|yarn|deno")}${ARG}${tok("publish")}`), why: "package publish" },
 	{ re: new RegExp(`${tok("cargo")}${ARG}${tok("publish")}`), why: "cargo publish" },
 	{ re: new RegExp(`${tok("uv")}${ARG}${tok("publish")}`), why: "uv publish" },
@@ -104,7 +54,6 @@ const RULES: Rule[] = [
 	{ re: new RegExp(`${tok("podman|buildah|oras|nerdctl|singularity|apptainer")}${ARG}${tok("push")}`), why: "image push" },
 	{ re: new RegExp(`${tok("helm")}${ARG}${tok("push")}`), why: "chart push" },
 
-	// ---- infrastructure writes ----------------------------------------------
 	{
 		re: new RegExp(`${tok("kubectl")}${ARG}${tok("apply|delete|patch|scale|rollout|drain|cordon|label|annotate")}`),
 		why: "kubectl mutates a live cluster",
@@ -117,7 +66,6 @@ const RULES: Rule[] = [
 	{ re: new RegExp(`${tok("aws")}${ARG}\\w+${tok("create|delete|put|update")}-?\\w+`), why: "aws CLI mutates infrastructure" },
 	{ re: new RegExp(`${tok("gcloud")}${ARG}\\S+`), why: "gcloud subcommand — review before allowing" },
 
-	// ---- raw HTTP writes -----------------------------------------------------
 	{
 		re: new RegExp(`${tok("curl")}${STAY}${tok("-X|--request")}${ARG}${tok("POST|PUT|PATCH|DELETE")}`),
 		why: "HTTP write request",
@@ -129,7 +77,7 @@ const RULES: Rule[] = [
 	},
 ];
 
-/** Files whose compromise defeats the guard itself — never written, not even with a "yes". */
+// These files cannot be written even after confirmation.
 const PROTECTED_FILE_DEFAULTS = [
 	"(^|/)[.]bashrc$",
 	"(^|/)[.]zshrc$",
@@ -178,7 +126,7 @@ export default function (pi: ExtensionAPI) {
 			if (protectedFiles.some((re) => re.test(path))) {
 				return {
 					block: true,
-						reason:
+					reason:
 						`vcs-guard: "${path}" is protected (editing it could weaken this guard or leak credentials). ` +
 						`Ask the user to edit it directly, or run pi with PI_VCS_GUARD=off.`,
 				};

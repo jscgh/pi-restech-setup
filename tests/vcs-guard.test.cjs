@@ -35,8 +35,8 @@ function extract(startMarker, endMarker) {
 
 function loadInContext(names) {
 	const code = [
-		extract('const tok =', '/** Files whose compromise'),
-		extract('/** Files whose compromise', 'export default'),
+		extract('const tok =', '// These files cannot be written'),
+		extract('// These files cannot be written', 'export default'),
 	].join('\n');
 	const exported = names.map((n) => `exports.${n} = ${n};`).join('\n');
 	const box = {};
