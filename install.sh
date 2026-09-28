@@ -1,30 +1,6 @@
 #!/usr/bin/env bash
-#
-# install.sh - Install the shared Pi + ResTech Local Inference setup.
-#
-# Usage:
-#   ./install.sh              # interactive: prompts for your RESTECH key
-#   ./install.sh --check      # verify an existing install (no changes)
-#
-# What it does:
-#   1. Checks prerequisites (pi on PATH, bash-capable shell).
-#   2. Prompts for the ResTech API key (hidden input) and validates the
-#      format. Skips the prompt if --check or if RESTECH_API_KEY is set
-#      and non-empty (unless --force-key).
-#   3. Writes the key to ~/.pi/.env (chmod 600, group/other 000).
-#   4. Appends a guarded source line to the user's shell init file so
-#      interactive shells (and therefore pi, subagents, and the
-#      documented ResTech quickstarts) pick the key up from the
-#      environment.
-#   5. Copies shared agent config into ~/.pi/agent/ with backups; personal
-#      AGENTS.md and settings.json are installed once and never overwritten.
-#   6. Updates pi to the latest public release and installs/updates packages.
-#   7. Runs a live smoke test against the gateway.
-#
-# Writes only below ~/.pi/agent, ~/.pi/.env, and the marked shell-init block.
-# Re-running is safe (idempotent). Use --no-update-pi and/or
-# --no-update-packages to pin installed software for one run.
-#
+# Install or verify the shared Pi and ResTech configuration.
+# Run with --help for options.
 set -euo pipefail
 
 REPO_DIR="${PI_SETUP_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
@@ -44,20 +20,58 @@ FORCE_KEY=0
 VALIDATE=1
 UPDATE_PI=1
 UPDATE_PACKAGES=1
+PROFILE="${PI_SETUP_PROFILE:-auto}"
 [ "${PI_SETUP_NO_UPDATE_PI:-}" = "1" ] && UPDATE_PI=0
 [ "${PI_SETUP_NO_UPDATE_PACKAGES:-}" = "1" ] && UPDATE_PACKAGES=0
+
+usage() {
+  cat <<'EOF'
+Usage: ./install.sh [options]
+
+  --check               Verify without changing files
+  --profile NAME        Select auto, katana, or default (default: auto)
+  --force-key           Replace the stored API key
+  --no-validate         Skip the live model check
+  --no-update-pi        Keep the installed Pi version
+  --no-update-packages  Skip package updates
+  -h, --help            Show this help
+EOF
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) MODE="check" ;;
+    --profile)
+      shift
+      [ $# -gt 0 ] || { echo "--profile requires a name" >&2; exit 2; }
+      PROFILE="$1"
+      ;;
     --no-update-pi) UPDATE_PI=0 ;;
     --no-update-packages) UPDATE_PACKAGES=0 ;;
     --force-key) FORCE_KEY=1 ;;
     --no-validate) VALIDATE=0 ;;
-    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
   shift
 done
+
+if [ "$PROFILE" = "auto" ]; then
+  HOSTNAME_SHORT="$(hostname -s 2>/dev/null || hostname)"
+  HOSTNAME_SHORT="${HOSTNAME_SHORT%%.*}"
+  HOSTNAME_SHORT="${HOSTNAME_SHORT,,}"
+  case "$HOSTNAME_SHORT" in
+    katana|katana[1-3]|kdm|k[0-9][0-9][0-9]) PROFILE="katana" ;;
+    *) PROFILE="default" ;;
+  esac
+fi
+
+if [ "$PROFILE" = "default" ]; then
+  PROFILE_DIR=""
+else
+  PROFILE_DIR="$REPO_DIR/profiles/$PROFILE"
+  [ -d "$PROFILE_DIR" ] || { echo "Unknown profile: $PROFILE" >&2; exit 2; }
+fi
 
 log()  { printf '\033[1;34m[pi-setup]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[pi-setup] WARN:\033[0m %s\n' "$*"; }
@@ -243,9 +257,9 @@ if [ "$MODE" = "install" ]; then
   # For bash: ensure login shells (ssh without tmux, non-interactive
   # profiles) also load ~/.bashrc, so the key is present there too.
   if [ "$(basename "${SHELL:-/bin/bash}")" = "bash" ]; then
-    PROFILE="$HOME/.profile"
-    if [ -f "$PROFILE" ] && ! grep -qE "bashrc" "$PROFILE" 2>/dev/null; then
-      printf '\nif [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n' >> "$PROFILE"
+    SHELL_PROFILE="$HOME/.profile"
+    if [ -f "$SHELL_PROFILE" ] && ! grep -qE "bashrc" "$SHELL_PROFILE" 2>/dev/null; then
+      printf '\nif [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n' >> "$SHELL_PROFILE"
       log "Made ~/.profile source ~/.bashrc for login shells."
     fi
   fi
@@ -286,18 +300,6 @@ copy_tree() {
       if cmp -s "$src" "$dst"; then
         continue
       fi
-      # NB: `bak` is declared with the other locals, and we mkdir its *dirname*
-      # rather than `$bak` itself. The original code did `local
-      # bak="$dst_root/.backup-$STAMP"; mkdir -p "$bak"; cp "$dst" "$bak/$rel"`,
-      # which for a nested rel (e.g. extensions/vcs-guard.ts) tried to write into
-      # a `.backup-<STAMP>/extensions/` subdirectory that was never created:
-      #   cp: cannot create regular file '.../.backup-TEST/extensions/vcs-guard.ts':
-      #       No such file or directory
-      # and under `set -e` that aborted the install mid-copy -- top-level files
-      # already done, the nested one left stale AND unbacked. (Reproduced against
-      # the verbatim original function.)
-      # NOT the cause, despite how it reads: `local` inside an `if` block does
-      # persist for the rest of the *function* scope, so `bak` was never unset.
       bak="$dst_root/.backup-$STAMP/$rel"
       mkdir -p "$(dirname "$bak")"
       cp -p "$dst" "$bak"
@@ -313,13 +315,7 @@ copy_tree() {
   )
 }
 
-# ---------------------------------------------------------------------------
-# 4b. Personal files: never overwrite, and never install a stale template over
-#     a live config. Anything the user may customise belongs in this list.
-#     AGENTS.md is per-person etiquette; settings.json is where pi itself writes
-#     state (lastChangelogVersion) and where `pi install` records packages --
-#     copying the template over it would silently unregister pi-notify.
-# ---------------------------------------------------------------------------
+# AGENTS.md is user-owned; Pi and package commands update settings.json.
 PERSONAL_FILES="${PI_SETUP_PERSONAL_FILES:-AGENTS.md settings.json}"
 
 
@@ -358,9 +354,7 @@ install_personal_file() {
   elif cmp -s "$src" "$dst"; then
     log "$pf_rel unchanged."
   else
-    # Keep ONE pristine copy of the user's file (never overwritten), so they can
-    # always recover their original even after many runs, and tell them how to
-    # inspect the delta against the template.
+    # Preserve the first local version for recovery.
     [ -f "$dst.bak" ] || cp -p "$dst" "$dst.bak" 2>/dev/null || true
     log "$pf_rel differs from the template -> kept yours. See: diff '$REPO_DIR/agent/$pf_rel' '$dst'"
   fi
@@ -372,22 +366,17 @@ fi
 
 if [ "$MODE" = "install" ]; then
   copy_tree "$REPO_DIR/agent" "$PI_AGENT_DIR"
+  if [ -n "$PROFILE_DIR" ]; then
+    copy_tree "$PROFILE_DIR" "$PI_AGENT_DIR"
+    log "Applied host profile: $PROFILE"
+  fi
   # Never clobber a coworker's auth.json or models-store.json (regenerable cache).
   log "Config installed into $PI_AGENT_DIR"
 fi
 
 # ---------------------------------------------------------------------------
-# 5b. Keep pi itself on the latest public release
+# 5b. Update Pi
 # ---------------------------------------------------------------------------
-# pi is a *managed* install (see ~/.pi/agent/install/managed-install.json), so
-# the supported way to move versions is `pi update` -- never npm install -g,
-# which would fight the releases-v1 layout and the ~/.local/bin/pi symlink.
-#
-# Off-switches, because auto-updating the tool an agent is currently driving is
-# a real hazard (docs: cli.md "pi update"):
-#   ./install.sh --no-update-pi      one run
-#   PI_SETUP_NO_UPDATE_PI=1          persistent, for people pinned to a version
-#   PI_NOTIFY... (unrelated)         package-level switches live below
 if [ "$MODE" = "install" ]; then
   if [ "$UPDATE_PI" = "1" ]; then
     before="$(pi --version 2>/dev/null | tail -n1 | tr -d '[:space:]' || true)"
@@ -440,10 +429,8 @@ if [ "$MODE" = "install" ]; then
     pi install npm:@tintinweb/pi-subagents@0.7.3
   fi
 
-  # The root package.json explicitly declares the nested notify entry point,
-  # so a normal git install is now supported. This was verified in a fresh pi
-  # process: one agent settle produced exactly one D-Bus Notify frame.
-  PI_NOTIFY_SOURCE="${PI_NOTIFY_SOURCE:-git:github.com/jscgh/pi-restech-setup}"
+  # Local-path installation follows edits to this checkout.
+  PI_NOTIFY_SOURCE="${PI_NOTIFY_SOURCE-$REPO_DIR}"
   if notify_package_registered; then
     log "pi-notify already installed."
   else
@@ -522,6 +509,15 @@ else
 
   [ -f "$PI_AGENT_DIR/extensions/minimal-mode.ts" ] || die "minimal-mode.ts extension missing."
 
+  if [ -n "$PROFILE_DIR" ]; then
+    while IFS= read -r -d '' profile_file; do
+      profile_rel="${profile_file#"$PROFILE_DIR/"}"
+      [ -f "$PI_AGENT_DIR/$profile_rel" ] || die "Profile file missing: $PI_AGENT_DIR/$profile_rel"
+      cmp -s "$profile_file" "$PI_AGENT_DIR/$profile_rel" || die "Profile file differs: $PI_AGENT_DIR/$profile_rel"
+    done < <(find "$PROFILE_DIR" -type f -print0)
+    log "Host profile $PROFILE is installed."
+  fi
+
   # Check the installed manifest, not a display name: pi can register an empty
   # git clone and still print "Installed".
   notify_pkg=0
@@ -529,13 +525,11 @@ else
   notify_file=0
   [ -f "$PI_AGENT_DIR/extensions/notify.ts" ] && notify_file=1
   if [ "$notify_pkg" -eq 1 ] && [ "$notify_file" -eq 1 ]; then
-    warn "pi-notify is installed BOTH as a package and as $PI_AGENT_DIR/extensions/notify.ts -- you will get two banners. Delete the file."
+    warn "pi-notify is installed BOTH as a package and as $PI_AGENT_DIR/extensions/notify.ts -- you will get two notifications. Delete the file."
   elif [ "$notify_pkg" -eq 0 ] && [ "$notify_file" -eq 0 ]; then
     die "pi-notify is not installed -- agent-finished notifications will not fire."
   else
     log "pi-notify present (package=$notify_pkg, file=$notify_file)."
-    grep -q "PI_NOTIFY_DISABLE" "$HOME/.bashrc" 2>/dev/null || \
-      log "Tip: for scripted 'pi -p' use, set PI_NOTIFY_DISABLE=1 (banners would pop)."
   fi
   # The guard is a safety control, so a silent failure to install it is worth a
   # hard stop rather than a note -- without it, remote writes are unpoliced.
