@@ -1,201 +1,117 @@
-Agent generated docs:
-
 # pi-restech-setup
 
-Shared [pi](https://github.com/earendil-works/pi) configuration for using UNSW
-**ResTech Local Inference** (`https://inference.restech.unsw.edu.au/`) — the
-on-premise OpenAI-compatible gateway — as your coding-agent backend.
+Shared [Pi](https://github.com/earendil-works/pi) configuration for the UNSW ResTech Local Inference service.
 
-Includes:
+## Included
 
-| Component | Purpose |
+| Path | Purpose |
 | --- | --- |
-| `agent/models.json` | restech provider + the three local models (env-var key reference, no secrets) |
-| `agent/settings.json` | sensible defaults: qwen3.8-flash-next as the workhorse, `hideThinkingBlock`, pi-subagents package |
-| `agent/subagents.json` | concurrency knobs for the subagent extension |
-| `agent/agents/*.md` | named subagents: Qwen/GLM workers + reviewers, frontier escalation |
-| `agent/prompts/*.md` | slash prompt templates (implement, review, escalate) |
-| `agent/extensions/minimal-mode.ts` | Codex-style collapsed tool rows (one line per call, Ctrl+O expands) |
-| `package/pi-notify/` | **installable pi package**: desktop notification when the agent waits for input. Freedesktop session bus first, so it works on GNOME Terminal/VTE, Ghostty and VS Code alike; OSC 777/99 + BEL only as a no-bus fallback; tmux-safe over ssh. Ghostty users may prefer its native `notify-on-command-finish` -- see `package/pi-notify/README.md` |
-| `agent/extensions/vcs-guard.ts` | **hard gate**: confirms before any remote write (`git push`, `gh pr create`, `npm publish`, `kubectl apply`, …); blocks edits to guard-critical config |
-| `agent/AGENTS.md` | repo etiquette: no unprompted pushes, commits allowed but not preferred, verification before publishing |
-| `tests/vcs-guard.test.cjs` | regression suite for the guard (52 block/allow cases). Run: `node tests/vcs-guard.test.cjs` |
+| `agent/models.json` | ResTech provider and model definitions; the API key is read from `RESTECH_API_KEY` |
+| `agent/settings.json` | Default model, thinking levels, and pi-subagents package |
+| `agent/agents/` | Local workers, reviewers, and optional frontier escalation |
+| `agent/prompts/` | Reusable implementation and review prompts |
+| `agent/extensions/minimal-mode.ts` | Compact built-in tool rendering based on Pi's `minimal-mode.ts` example |
+| `agent/extensions/session-title.ts` | Session and terminal titles |
+| `agent/extensions/summary-router.ts` | Compaction through a configurable model fallback chain |
+| `agent/extensions/handoff.ts` | `/handoff <goal>` command for starting a focused session |
+| `agent/extensions/vcs-guard.ts` | Confirmation gate for remote writes and protection for sensitive config |
+| `profiles/katana/` | Shared Katana guidance with optional, gitignored `references/katana-personal.md` |
+| `package/pi-notify/` | Notification package based on Pi's `notify.ts` example |
 
-## Prerequisites
+## Requirements
 
-1. **pi** installed and on your `PATH`.
-2. A **ResTech API key** (`sk-…`). Local Inference is a PoC with invite-only,
-   per-project keys — request one via *Request access* on
-   <https://inference.restech.unsw.edu.au/>.
+- `pi` on `PATH`
+- A ResTech API key from <https://inference.restech.unsw.edu.au/>
+- Bash
 
 ## Install
 
 ```bash
-git clone <this repo> pi-restech-setup   # or copy the folder
+git clone <repository-url> pi-restech-setup
 cd pi-restech-setup
 ./install.sh
 ```
 
-The script will:
+The installer:
 
-- prompt for your `sk-…` key (hidden input), verify it live against the
-  gateway, and store it in `~/.pi/.env` with mode **600**
-- append a small, clearly-marked source block to your shell init file
-  (`~/.bashrc` / `~/.zshrc` / `~/.profile`) so interactive and login shells
-  export the key — this is required because pi reads provider keys from the
-  **process environment**, not from `~/.pi/.env` automatically
-- copy the config into `~/.pi/agent/`, backing up (never deleting) any file
-  it replaces into `~/.pi/agent/.backup-<timestamp>/`
-- install the `pi-subagents` extension package
-- run an end-to-end smoke test against the gateway
+- validates and stores the API key in `~/.pi/.env` with mode `600`
+- adds a marked loader block to the active shell startup file
+- copies shared configuration to `~/.pi/agent/`, backing up replaced files
+- installs pi-subagents and pi-notify
+- updates Pi and packages unless disabled
+- runs a ResTech smoke test
 
-Re-running is safe and is also **how you update**: `git pull && ./install.sh`
-re-copies shared config, tops up missing packages (and now **aborts if pi-notify
-is not actually loadable**, rather than reporting success), and runs `pi update`
-to stay on the latest public pi (disable with `--no-update-pi` or
-`PI_SETUP_NO_UPDATE_PI=1`; restart pi afterwards to run a new build). Package
-updates are independent; disable them with `--no-update-packages` or
-`PI_SETUP_NO_UPDATE_PACKAGES=1`.
+The Katana profile is selected automatically on `katana`, `katana1`–`katana3`, `kdm`, and three-digit compute hosts such as `k123`. Other hosts receive only the shared configuration.
 
-Nothing outside `~/.pi/agent/`, `~/.pi/.env`, and the marked shell-init block is
-touched.
+`AGENTS.md` and `settings.json` are installed once and then treated as local configuration. Existing copies are retained. Override this list with `PI_SETUP_PERSONAL_FILES`.
 
-### Personal files are never overwritten
-
-`AGENTS.md` and `settings.json` are treated as **yours**. The installer keeps
-your copy, leaves a one-time `~/.pi/agent/<file>.bak` of it, and reports the
-delta instead of clobbering:
-
-```
-[pi-setup] AGENTS.md is personal & differs from template (kept yours).
-```
-
-That is deliberate — conciseness rules, model preferences, and installed
-packages differ per person, and `pi` itself writes state into `settings.json`
-(`lastChangelogVersion`, `packages`). So there is no template drift: to adopt a
-new template line, copy it in by hand after reading the diff. Override the list
-with `PI_SETUP_PERSONAL_FILES="settings.json"` to protect only one of them, or
-`PI_SETUP_PERSONAL_FILES=""` to have the installer enforce the template for both
-(the latter overwrites your copies, after backing them up). Names match on
-basename at any depth, so do not add a shared `prompts/AGENTS.md`.
-
-Check an existing install without changing anything:
+Useful options:
 
 ```bash
-./install.sh --check
+./install.sh --check               # verify without changing files
+./install.sh --profile katana      # force Katana guidance
+./install.sh --profile default     # omit Katana guidance
+./install.sh --force-key           # replace the stored key
+./install.sh --no-validate         # skip the live model check
+./install.sh --no-update-pi        # keep the installed Pi version
+./install.sh --no-update-packages  # skip package updates
 ```
 
-Replace the stored key (e.g. after re-requesting access):
-
-```bash
-./install.sh --force-key
-```
+Re-run `./install.sh` after updating the checkout. The script is idempotent.
 
 ## Usage
 
 ```bash
-pi                                      # new session, qwen3.8-flash-next by default
-pi --model restech/glm-5.3-flash        # bigger model for hard reasoning/tool use
-pi --model restech/qwen3.8-27b          # general purpose
+pi
+pi --model restech/qwen3.8-27b
+pi --model restech/glm-5.3-flash
 ```
 
-- **Ctrl+O** toggles tool output collapse/expand (thanks to the minimal-mode
-  extension, collapsed = one line per call).
-- `/agents` lists the named subagents; `@worker-glm`, `@review-qwen` etc. can
-  be invoked via the subagents extension's `Agent` tool.
+- `Ctrl+O` toggles compact and expanded tool output.
+- `/agents` lists named subagents.
+- `/handoff <goal>` creates a focused child session with an editable prompt.
+- Compaction uses `restech/qwen3.8-flash-next`, then `openai-codex/gpt-5.6-luna`, then the active model. Override the chain with comma-separated `PI_COMPACT_MODELS` entries.
 
-## Model guidance (from the ResTech service page)
+## Models
 
-| Model | Tier | Notes |
+| Model | Default thinking | Use |
 | --- | --- | --- |
-| `qwen3.8-flash-next` | Fast | **Recommended default for agent loops.** 125B, two serving replicas = most capacity. |
-| `qwen3.8-27b` | High quality | General-purpose chat/reasoning. 27B, federated node. |
-| `glm-5.3-flash` | Deep reasoning | 320B MoE (A18B). Strongest, but shares one node with the qwen replicas — occasionally 503s under load. |
+| `qwen3.8-flash-next` | `medium` | Default agent loops |
+| `qwen3.8-27b` | `medium` | General-purpose work |
+| `glm-5.3-flash` | `high` | Deeper reasoning |
 
-### Thinking levels
+The configured endpoint accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Change the current level with `/thinking`.
 
-The endpoint accepts `reasoning_effort` in
-`none|minimal|low|medium|high|xhigh|max` on all three ResTech models, so
-`models.json` declares a full `thinkingLevelMap` for each. Without that map Pi
-hides `xhigh`/`max` and collapses `low`/`medium`/`high` onto one token budget —
-if you add a model, copy the map.
+## Remote-write guard
 
-Startup levels are pinned per model in `settings.json`:
+`agent/extensions/vcs-guard.ts` asks before commands that publish, deploy, upload, or modify hosted infrastructure. Without an interactive UI it blocks those commands. It also blocks agent writes to credentials, shell startup files, SSH configuration, and guard-critical Pi configuration.
 
-| Model | Default | Why |
-| --- | --- | --- |
-| `qwen3.8-flash-next`, `qwen3.8-27b` | `medium` | Levels barely separate below `high`; `medium` is the cheaper default for agent loops. |
-| `glm-5.3-flash` | `high` | `low`/`medium` collapse its thinking to near-zero tokens. Do not drop it. |
-| `openai-codex/*` | `low` | ChatGPT quota is finite — raise per session only when needed. |
+The guard matches command text; it is not a sandbox. Keep normal repository and infrastructure protections enabled.
 
-Override for one session with `/thinking` (press `Ctrl+S` there to save it as
-that model's default, which rewrites `modelThinkingLevels`).
-
-## Safety rails: no pushes without your say-so
-
-Pi has **no built-in permission system** — `docs/how-pi-works.md` is explicit that
-tools run with the OS permissions of the Pi process. So the "never push without
-approval" rule is enforced mechanically by `agent/extensions/vcs-guard.ts`, not
-merely requested in a prompt. A `tool_call` handler is the only choke point that
-also covers **subagents**, which is where the real risk sits: an autonomous worker
-"helpfully" pushing on completion.
-
-| | |
-| --- | --- |
-| **Asks for confirmation** | `git push` (any form), `gh`/`glab`/`hub`/`arc` mutating subcommands, `gh api -X POST\|PUT\|PATCH\|DELETE`, `npm\|pnpm\|yarn\|cargo\|uv publish`, `twine upload`, `mvn\|gradle deploy`, `docker\|podman push`, `kubectl apply\|delete`, `terraform apply\|destroy`, `helm install\|upgrade`, `aws/gcloud create\|delete`, `curl`/`wget` write requests |
-| **Blocked outright** | writes to shell init files, `~/.pi/.env`, `~/.pi/agent/{settings,models,auth}.json`, `~/.pi/agent/extensions/`, `~/.ssh/`, `.git-credentials` — i.e. anything the agent could use to weaken the guard or exfiltrate a key |
-| **Always allowed** | `git commit`/`add`/`status`/`diff`/`log`/`fetch`/`pull`/`checkout`/`branch`/`stash`/`rebase`/`reset`/`cherry-pick`/`tag`/`worktree`, read-only `gh pr view`, `gh api -X GET`, and all normal builds/tests |
-
-When there is no UI (RPC, CI, `--print`), flagged commands are **blocked rather
-than allowed** — the handler fails closed.
-
-Escapes:
+Emergency overrides for a session:
 
 ```bash
-PI_VCS_GUARD=off pi        # disable the extension for one session
-PI_VCS_ALLOW_PUSH=1 pi     # allow remote writes without prompting
+PI_VCS_GUARD=off pi
+PI_VCS_ALLOW_PUSH=1 pi
 ```
 
-Two honest limitations. It pattern-matches **command text**, so a wrapper script
-that pushes, a shell alias, or `xargs git push` can slip through — it is a
-seatbelt, not a sandbox, so keep branch protection on `main`. And it is a
-**denylist**, which is the weaker of the two designs; a default-deny approach
-that allowedlisted known-safe commands instead would be stronger but would nag
-on every unfamiliar CLI.
-
-### Verifying it
+## Verification
 
 ```bash
 node tests/vcs-guard.test.cjs
 ```
 
-The suite loads `RULES` straight out of the shipped `.ts` (no duplicated table to
-drift) and asserts every case above. It earns its keep: during development an
-`ARG` regex of `\s+\S+` instead of `\s+` silently consumed the subcommand word
-and disabled **every** `gh`/`glab`/`npm`/`cargo` rule while the extension still
-loaded cleanly. The git-push cases still passed, so only the suite caught it.
-Add a rule here whenever you add one.
+## Security
 
-## Security notes
-
-- Your `sk-…` key is stored **only** in `~/.pi/.env` (mode 600) and exported
-  from your shell init file. It is never written into `models.json` or any
-  file in this repo.
-- This repo is safe to share as-is; if you fork it, keep a `.gitignore` with
-  `.env` and `auth.json` to stay that way.
+- The API key is stored only in `~/.pi/.env`; it is not written to repository files.
+- `.env`, `auth.json`, and common credential files are ignored.
+- Review extensions before installing them; Pi extensions run with the permissions of the Pi process.
 
 ## Uninstall
 
 ```bash
-rm ~/.pi/agent/extensions/minimal-mode.ts
-pi uninstall git:github.com/jscgh/pi-restech-setup
-
-`pi install git:github.com/jscgh/pi-restech-setup` installs notify through the
-root `package.json`, which explicitly exposes the nested extension. A local
-`pi install <repo>/package/pi-notify` also works but symlinks the checkout.
-# restore your previous agent config if the installer backed one up:
-ls ~/.pi/agent/.backup-*
-# remove the key + shell block by hand:
-#   delete the ~/.pi/.env line and the MARKER block in your shell rc
+rm ~/.pi/agent/extensions/{handoff,minimal-mode,session-title,summary-router,vcs-guard}.ts
+pi uninstall "$HOME/pi-restech-setup"
 ```
 
+Remove the marked shell block and `~/.pi/.env` manually if they are no longer needed.
