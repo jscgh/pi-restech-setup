@@ -1,18 +1,6 @@
 /**
- * Minimal Mode (compressed) - Codex-style single-line tool rendering
- *
- * Collapsed (default): each tool call shows exactly ONE short line
- * (e.g. `$ npm test`, `read src/foo.ts`) with pi's default state-based
- * background tint (pending/success/error), so it looks like stock pi -
- * just smaller. No output. Ctrl+O expands both the command (full text,
- * default styling) and the output (indented). Errors show a one-line
- * error hint while collapsed.
- *
- * Based on the official minimal-mode.ts example from pi, modified:
- * - TruncatedText-equivalent single-line rendering with the same
- *   toolPendingBg/toolSuccessBg/toolErrorBg tint the default box uses
- * - renderCall honors context.expanded (full command when expanded)
- * - collapsed results render nothing (except a short error line)
+ * Based on Pi's examples/extensions/minimal-mode.ts.
+ * Adds one-line tinted calls, compact errors, and width-safe truncation.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -28,7 +16,6 @@ import {
 import { Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { homedir } from "os";
 
-/** Shorten a path by replacing home directory with ~ */
 function shortenPath(path: string): string {
 	const home = homedir();
 	if (path.startsWith(home)) {
@@ -37,13 +24,11 @@ function shortenPath(path: string): string {
 	return path;
 }
 
-/** Collapse to one line, capped at a sane length. */
 function oneLine(text: string, max = 120): string {
 	const flat = (text || "").replace(/\s+/g, " ").trim();
 	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-/** Style each line of multi-line text with the same style fn, joined. */
 function styleLines(text: string, style: (line: string) => string): string {
 	return text
 		.split("\n")
@@ -51,10 +36,6 @@ function styleLines(text: string, style: (line: string) => string): string {
 		.join("\n");
 }
 
-/**
- * Single-line component: truncates to terminal width (ANSI-safe) and
- * applies pi's state background tint, mimicking the default Box shell.
- */
 class TintedLine implements Component {
 	private text: string;
 	private bgFn: ((text: string) => string) | undefined;
@@ -80,8 +61,7 @@ class TintedLine implements Component {
 	}
 
 	render(width: number): string[] {
-		// Empty text renders ZERO lines (not one blank line) - keeps the
-		// collapsed layout to exactly: 1 blank separator + the command line.
+		// An empty component must occupy no terminal row.
 		if (!this.text) return [];
 		if (this.cachedLines === undefined || this.cachedWidth !== width) {
 			let line = truncateToWidth(this.text, Math.max(1, width), "…");
@@ -93,7 +73,6 @@ class TintedLine implements Component {
 	}
 }
 
-// Cache for built-in tools by cwd
 const toolCache = new Map<string, ReturnType<typeof createBuiltInTools>>();
 
 function createBuiltInTools(cwd: string) {
@@ -122,14 +101,12 @@ function firstText(result: { content: Array<{ type: string; text?: string }> }):
 	return textContent && textContent.type === "text" ? textContent.text : "";
 }
 
-/** State-dependent background tint, same tokens the default Box shell uses. */
 function stateBg(theme: any, context: any): (text: string) => string {
 	if (context?.isPartial) return (text: string) => theme.bg("toolPendingBg", text);
 	if (context?.isError) return (text: string) => theme.bg("toolErrorBg", text);
 	return (text: string) => theme.bg("toolSuccessBg", text);
 }
 
-/** Expanded tool output: indented under the command, in toolOutput color. */
 function expandedOutput(result: any, theme: any, bgFn: (text: string) => string): Text {
 	const text = firstText(result).trim();
 	if (!text) return new Text("", 0, 0, bgFn);
@@ -138,11 +115,6 @@ function expandedOutput(result: any, theme: any, bgFn: (text: string) => string)
 }
 
 export default function (pi: ExtensionAPI) {
-	/**
-	 * Register a built-in with a custom renderer.
-	 * - `compact(args, theme)` returns the single collapsed line.
-	 * - `full(args, theme)` returns the expanded call view (default pi style).
-	 */
 	const register = (
 		name: string,
 		description: string,
@@ -157,7 +129,7 @@ export default function (pi: ExtensionAPI) {
 			parameters: original.parameters,
 
 			async execute(toolCallId: string, params: any, signal: any, onUpdate: any, ctx: any) {
-				return (getBuiltInTools(ctx.cwd) as any)[name].execute(toolCallId, params, signal, onUpdate);
+				return (getBuiltInTools(ctx.cwd) as any)[name].execute(toolCallId, params, signal, onUpdate, ctx);
 			},
 
 			renderCall(args: any, theme: any, context: any) {
@@ -178,7 +150,6 @@ export default function (pi: ExtensionAPI) {
 		});
 	};
 
-	// --- read ---
 	register(
 		"read",
 		"Read the contents of a file. Supports text files and images. Output is truncated to 2000 lines or 50KB. Use offset/limit for large files.",
@@ -202,7 +173,6 @@ export default function (pi: ExtensionAPI) {
 		},
 	);
 
-	// --- bash ---
 	register(
 		"bash",
 		"Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB.",
@@ -223,7 +193,6 @@ export default function (pi: ExtensionAPI) {
 		},
 	);
 
-	// --- write ---
 	register(
 		"write",
 		"Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
@@ -232,7 +201,6 @@ export default function (pi: ExtensionAPI) {
 		(args, theme) => theme.fg("toolTitle", theme.bold("write ")) + theme.fg("accent", args.path || "..."),
 	);
 
-	// --- edit ---
 	register(
 		"edit",
 		"Edit a file by replacing exact text. The oldText must match exactly (including whitespace). Use this for precise, surgical edits.",
@@ -241,7 +209,6 @@ export default function (pi: ExtensionAPI) {
 		(args, theme) => theme.fg("toolTitle", theme.bold("edit ")) + theme.fg("accent", args.path || "..."),
 	);
 
-	// --- find ---
 	register(
 		"find",
 		"Find files by name pattern (glob). Searches recursively from the specified path. Output limited to 200 results.",
@@ -259,7 +226,6 @@ export default function (pi: ExtensionAPI) {
 		},
 	);
 
-	// --- grep ---
 	register(
 		"grep",
 		"Search file contents by regex pattern. Uses ripgrep. Output limited to 200 matches.",
@@ -278,7 +244,6 @@ export default function (pi: ExtensionAPI) {
 		},
 	);
 
-	// --- ls ---
 	register(
 		"ls",
 		"List directory contents with file sizes. Output limited to 500 entries.",
