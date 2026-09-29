@@ -92,12 +92,25 @@ log "pi: $(command -v pi)"
 # idempotent. For bash we also make sure ~/.profile sources ~/.bashrc so
 # login-only sessions (ssh host, no tmux) pick it up.
 # ---------------------------------------------------------------------------
+detect_user_shell() {
+  local name login_shell parent
+  name="$(basename "${SHELL:-}")"
+  case "$name" in bash|zsh) printf '%s\n' "$name"; return ;; esac
+
+  login_shell="$(getent passwd "${USER:-$(id -un)}" 2>/dev/null | cut -d: -f7)"
+  name="$(basename "$login_shell")"
+  case "$name" in bash|zsh) printf '%s\n' "$name"; return ;; esac
+
+  parent="$(ps -p "$PPID" -o comm= 2>/dev/null | sed 's/^-//')"
+  name="$(basename "$parent")"
+  case "$name" in bash|zsh) printf '%s\n' "$name"; return ;; esac
+  printf '%s\n' sh
+}
+
 shell_init_files() {
-  local shell_name
-  shell_name="$(basename "${SHELL:-/bin/bash}")"
-  case "$shell_name" in
-    zsh)  echo "$HOME/.zshrc" ;;
+  case "$(detect_user_shell)" in
     bash) echo "$HOME/.bashrc" ;;
+    zsh)  echo "$HOME/.zshrc" ;;
     *)    echo "$HOME/.profile" ;;
   esac
 }
@@ -256,7 +269,7 @@ if [ "$MODE" = "install" ]; then
 
   # For bash: ensure login shells (ssh without tmux, non-interactive
   # profiles) also load ~/.bashrc, so the key is present there too.
-  if [ "$(basename "${SHELL:-/bin/bash}")" = "bash" ]; then
+  if [ "$(detect_user_shell)" = bash ]; then
     SHELL_PROFILE="$HOME/.profile"
     if [ -f "$SHELL_PROFILE" ] && ! grep -qE "bashrc" "$SHELL_PROFILE" 2>/dev/null; then
       printf '\nif [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n' >> "$SHELL_PROFILE"
@@ -355,24 +368,82 @@ excluded_files() {
   done
 }
 
+install_agents_file() {
+  local src="$REPO_DIR/agent/AGENTS.md" dst="$PI_AGENT_DIR/AGENTS.md"
+  local state_dir="$PI_AGENT_DIR/.pi-restech-setup/base" base
+  local candidate tmp rev status
+  base="$state_dir/AGENTS.md"
+  mkdir -p "$state_dir"
+
+  if [ ! -f "$dst" ]; then
+    cp -p "$src" "$dst"
+    cp -p "$src" "$base"
+    log "Installed AGENTS.md."
+    return
+  fi
+  if cmp -s "$src" "$dst"; then
+    cp -p "$src" "$base"
+    log "AGENTS.md unchanged."
+    return
+  fi
+
+  # Bootstrap upgrades from an older checkout by finding the exact template
+  # from which the personal copy originated.
+  if [ ! -f "$base" ] && git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    candidate="$(mktemp)"
+    while IFS= read -r rev; do
+      git -C "$REPO_DIR" show "$rev:agent/AGENTS.md" > "$candidate" 2>/dev/null || continue
+      if cmp -s "$candidate" "$dst"; then
+        cp -p "$candidate" "$base"
+        break
+      fi
+    done < <(git -C "$REPO_DIR" rev-list HEAD -- agent/AGENTS.md)
+    rm -f "$candidate"
+  fi
+
+  if [ ! -f "$base" ]; then
+    cp -p "$src" "$base"
+    log "AGENTS.md has untracked personal changes; kept yours and recorded the current template for future merges."
+    return
+  fi
+  if cmp -s "$src" "$base"; then
+    log "AGENTS.md has personal changes and is current."
+    return
+  fi
+
+  tmp="$(mktemp)"
+  status=0
+  git merge-file -p "$dst" "$base" "$src" > "$tmp" || status=$?
+  if [ "$status" -eq 0 ]; then
+    cp -p "$dst" "$dst.bak"
+    cat "$tmp" > "$dst"
+    cp -p "$src" "$base"
+    log "Merged template updates into personal AGENTS.md (previous copy: $dst.bak)."
+  elif [ "$status" -eq 1 ]; then
+    warn "AGENTS.md template update conflicts with personal edits; kept yours."
+  else
+    rm -f "$tmp"
+    die "Could not merge AGENTS.md template updates."
+  fi
+  rm -f "$tmp"
+}
+
 install_personal_file() {
   local pf_rel="$1" src dst
   [ -n "$pf_rel" ] || return 0
+  if [ "$pf_rel" = "AGENTS.md" ]; then
+    install_agents_file
+    return
+  fi
   src="$REPO_DIR/agent/$pf_rel"; dst="$PI_AGENT_DIR/$pf_rel"
   [ -f "$src" ] || return 0
   if [ ! -f "$dst" ]; then
     mkdir -p "$(dirname "$dst")"
-    if [ -f "$dst.bak" ]; then
-      cp -p "$dst.bak" "$dst"
-      log "Restored your $pf_rel from $dst.bak (template not applied)."
-    else
-      cp -p "$src" "$dst"
-      log "Installed $pf_rel (first time; now yours to keep)."
-    fi
+    cp -p "$src" "$dst"
+    log "Installed $pf_rel (first time; now yours to keep)."
   elif cmp -s "$src" "$dst"; then
     log "$pf_rel unchanged."
   else
-    # Preserve the first local version for recovery.
     [ -f "$dst.bak" ] || cp -p "$dst" "$dst.bak" 2>/dev/null || true
     log "$pf_rel differs from the template -> kept yours. See: diff '$REPO_DIR/agent/$pf_rel' '$dst'"
   fi
@@ -504,8 +575,12 @@ else
         fi
       elif cmp -s "$REPO_DIR/agent/$pf_" "$PI_AGENT_DIR/$pf_"; then
         log "$pf_ matches the template."
+      elif [ "$pf_" = "AGENTS.md" ] \
+        && [ -f "$PI_AGENT_DIR/.pi-restech-setup/base/AGENTS.md" ] \
+        && cmp -s "$REPO_DIR/agent/AGENTS.md" "$PI_AGENT_DIR/.pi-restech-setup/base/AGENTS.md"; then
+        log "AGENTS.md personal changes are based on the current template."
       else
-        log "$pf_ is personal & differs from template (kept yours). Diff: diff '$REPO_DIR/agent/$pf_' '$PI_AGENT_DIR/$pf_'"
+        log "$pf_ is personal & needs merging; run ./install.sh."
       fi
     fi
   done

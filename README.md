@@ -44,7 +44,7 @@ The installer:
 
 The Katana profile is selected automatically on `katana`, `katana1`–`katana3`, `kdm`, and three-digit compute hosts such as `k123`. Other hosts receive only the shared configuration.
 
-`AGENTS.md` and `settings.json` are installed once and then treated as local configuration. Existing copies are retained. Override this list with `PI_SETUP_PERSONAL_FILES`.
+`AGENTS.md` template updates are three-way merged with local edits. `settings.json` remains local after first installation. Override the personal-file list with `PI_SETUP_PERSONAL_FILES`.
 
 Useful options:
 
