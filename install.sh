@@ -279,13 +279,6 @@ case "$PI_AGENT_DIR" in
   "$REPO_DIR/agent"/*) die "PI_AGENT_DIR ($PI_AGENT_DIR) is inside the source tree -- refusing to sync." ;;
 esac
 [ -d "$REPO_DIR/agent" ] || die "REPO_DIR ($REPO_DIR) has no agent/ dir -- is this the pi-restech-setup repo?"
-  # Only meaningful on the install path: --check must not warn about a package
-  # dir that a read-only verification of an already-working install never uses.
-  if [ "$MODE" = "install" ]; then
-    if [ ! -d "$REPO_DIR/package/pi-notify" ]; then
-      warn "$REPO_DIR/package/pi-notify missing; pi-notify cannot be installed from this checkout."
-    fi
-  fi
 
 # ---------------------------------------------------------------------------
 # 5. Copy agent config into ~/.pi/agent/ (backup-then-copy, per file)
@@ -318,6 +311,31 @@ copy_tree() {
 # AGENTS.md is user-owned; Pi and package commands update settings.json.
 PERSONAL_FILES="${PI_SETUP_PERSONAL_FILES:-AGENTS.md settings.json}"
 
+# Ignore Pi's runtime-only changelog marker and object-key formatting.
+settings_match_template() {
+  node - "$REPO_DIR/agent/settings.json" "$PI_AGENT_DIR/settings.json" <<'NODE'
+const fs = require("fs");
+const [templateFile, installedFile] = process.argv.slice(2);
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]));
+  }
+  return value;
+}
+function normalized(file) {
+  const value = JSON.parse(fs.readFileSync(file, "utf8"));
+  delete value.lastChangelogVersion;
+  return JSON.stringify(canonical(value));
+}
+try {
+  process.exit(normalized(templateFile) === normalized(installedFile) ? 0 : 1);
+} catch (error) {
+  console.error(error.message);
+  process.exit(2);
+}
+NODE
+}
 
 is_personal() {
   local rel="$1" pf base
@@ -404,23 +422,6 @@ fi
 # ---------------------------------------------------------------------------
 # 6. pi packages
 # ---------------------------------------------------------------------------
-# `pi install` can print success for a git clone that contains no discoverable
-# extension. Validate the installed package path and its manifest, not the
-# source label alone.
-notify_package_registered() {
-  local path manifest
-  while IFS= read -r path; do
-    path="${path#    }"
-    [ -d "$path" ] || continue
-    manifest="$path/package.json"
-    [ -f "$manifest" ] || continue
-    if grep -q 'package/pi-notify/extensions/notify.ts\|extensions/notify.ts' "$manifest"; then
-      return 0
-    fi
-  done < <(pi list 2>/dev/null | grep '^    /' || true)
-  return 1
-}
-
 if [ "$MODE" = "install" ]; then
   if pi list 2>/dev/null | grep -q "pi-subagents"; then
     log "pi-subagents already installed."
@@ -429,17 +430,10 @@ if [ "$MODE" = "install" ]; then
     pi install npm:@tintinweb/pi-subagents@0.7.3
   fi
 
-  # Local-path installation follows edits to this checkout.
-  PI_NOTIFY_SOURCE="${PI_NOTIFY_SOURCE-$REPO_DIR}"
-  if notify_package_registered; then
-    log "pi-notify already installed."
-  else
-    log "Installing pi-notify from $PI_NOTIFY_SOURCE ..."
-    if ! pi install "$PI_NOTIFY_SOURCE"; then
-      die "pi install '$PI_NOTIFY_SOURCE' failed."
-    fi
-    notify_package_registered \
-      || die "pi installed '$PI_NOTIFY_SOURCE' but its manifest exposes no notify extension."
+  # Migrate older installs: notify.ts is now copied with the other extensions.
+  if pi list 2>/dev/null | grep -qF "$REPO_DIR"; then
+    log "Removing legacy local pi-notify package registration..."
+    pi remove "$REPO_DIR"
   fi
 
   # Package updates are independent from the pi binary update/pin decision.
@@ -499,7 +493,16 @@ else
   # drifted from the template (they may want the new bits by hand).
   for pf_ in $PERSONAL_FILES; do
     if [ -f "$REPO_DIR/agent/$pf_" ] && [ -f "$PI_AGENT_DIR/$pf_" ]; then
-      if cmp -s "$REPO_DIR/agent/$pf_" "$PI_AGENT_DIR/$pf_"; then
+      if [ "$pf_" = "settings.json" ]; then
+        if settings_match_template; then
+          log "$pf_ matches the template (ignoring Pi-managed state)."
+        else
+          settings_status=$?
+          [ "$settings_status" -eq 1 ] \
+            || die "Could not parse settings.json while comparing it with the template."
+          log "$pf_ is personal & differs from template (ignoring Pi-managed state; kept yours)."
+        fi
+      elif cmp -s "$REPO_DIR/agent/$pf_" "$PI_AGENT_DIR/$pf_"; then
         log "$pf_ matches the template."
       else
         log "$pf_ is personal & differs from template (kept yours). Diff: diff '$REPO_DIR/agent/$pf_' '$PI_AGENT_DIR/$pf_'"
@@ -507,7 +510,16 @@ else
     fi
   done
 
-  [ -f "$PI_AGENT_DIR/extensions/minimal-mode.ts" ] || die "minimal-mode.ts extension missing."
+  while IFS= read -r -d '' shared_rel; do
+    [ -f "$PI_AGENT_DIR/$shared_rel" ] || die "Shared config missing: $PI_AGENT_DIR/$shared_rel"
+    cmp -s "$REPO_DIR/agent/$shared_rel" "$PI_AGENT_DIR/$shared_rel" \
+      || die "Shared config differs: $PI_AGENT_DIR/$shared_rel; run ./install.sh to update it."
+  done < <(
+    cd "$REPO_DIR/agent"
+    while IFS= read -r -d '' found; do printf '%s\0' "${found#./}"; done \
+      < <(find . -type f -print0) | excluded_files
+  )
+  log "Shared agent configuration is installed and current."
 
   if [ -n "$PROFILE_DIR" ]; then
     while IFS= read -r -d '' profile_file; do
@@ -518,22 +530,7 @@ else
     log "Host profile $PROFILE is installed."
   fi
 
-  # Check the installed manifest, not a display name: pi can register an empty
-  # git clone and still print "Installed".
-  notify_pkg=0
-  notify_package_registered && notify_pkg=1
-  notify_file=0
-  [ -f "$PI_AGENT_DIR/extensions/notify.ts" ] && notify_file=1
-  if [ "$notify_pkg" -eq 1 ] && [ "$notify_file" -eq 1 ]; then
-    warn "pi-notify is installed BOTH as a package and as $PI_AGENT_DIR/extensions/notify.ts -- you will get two notifications. Delete the file."
-  elif [ "$notify_pkg" -eq 0 ] && [ "$notify_file" -eq 0 ]; then
-    die "pi-notify is not installed -- agent-finished notifications will not fire."
-  else
-    log "pi-notify present (package=$notify_pkg, file=$notify_file)."
-  fi
-  # The guard is a safety control, so a silent failure to install it is worth a
-  # hard stop rather than a note -- without it, remote writes are unpoliced.
-  [ -f "$PI_AGENT_DIR/extensions/vcs-guard.ts" ] || die "vcs-guard.ts extension missing (remote writes are NOT being gated)."
+  # The guard is a safety control, so verify its behavior as well as its copy.
   node "$REPO_DIR/tests/vcs-guard.test.cjs" >/dev/null 2>&1 || die "vcs-guard rules failed their test suite; do not rely on the guard."
   log "vcs-guard installed and its rule suite passes."
   if [ -f "$PI_ENV_FILE" ]; then

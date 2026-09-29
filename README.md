@@ -16,13 +16,14 @@ Shared [Pi](https://github.com/earendil-works/pi) configuration for the UNSW Res
 | `agent/extensions/handoff.ts` | `/handoff <goal>` command for starting a focused session |
 | `agent/extensions/vcs-guard.ts` | Confirmation gate for remote writes and protection for sensitive config |
 | `profiles/katana/` | Shared Katana guidance with optional, gitignored `references/katana-personal.md` |
-| `package/pi-notify/` | Notification package based on Pi's `notify.ts` example |
+| `agent/extensions/notify.ts` | Notifications based on Pi's `notify.ts` example |
 
 ## Requirements
 
 - `pi` on `PATH`
 - A ResTech API key from <https://inference.restech.unsw.edu.au/>
 - Bash
+- Node.js
 
 ## Install
 
@@ -110,8 +111,7 @@ node tests/vcs-guard.test.cjs
 ## Uninstall
 
 ```bash
-rm ~/.pi/agent/extensions/{handoff,minimal-mode,session-title,summary-router,vcs-guard}.ts
-pi uninstall "$HOME/pi-restech-setup"
+rm ~/.pi/agent/extensions/{handoff,minimal-mode,notify,session-title,summary-router,vcs-guard}.ts
 ```
 
 Remove the marked shell block and `~/.pi/.env` manually if they are no longer needed.

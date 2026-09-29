@@ -10,6 +10,12 @@ this file is the intent behind them.
 - One clear clarifying question beats hedging several branches.
 - State an uncertainty once, plainly; don't re-litigate a past mistake unless asked.
 
+## Prefer existing solutions
+
+Before building from scratch, quickly check the repository, available tools,
+relevant docs/registries, and the web. Keep the search proportional; prefer a
+suitable maintained solution.
+
 ## Publishing to remote hosts — always ask first
 
 Never mutate shared/remote state without my **explicit approval in this
