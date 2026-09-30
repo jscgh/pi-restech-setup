@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
-# Install or verify the shared Pi and ResTech configuration.
-# Run with --help for options.
 set -euo pipefail
 
 REPO_DIR="${PI_SETUP_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 PI_AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
-# Normalize a caller-supplied trailing slash so the overlap guard cannot be
-# bypassed by spelling the same directory as ~/.pi/agent/.
 PI_AGENT_DIR="${PI_AGENT_DIR%/}"
 PI_ENV_FILE="$HOME/.pi/.env"
 MARKER_BEGIN="# >>> pi-restech-setup >>>"
@@ -14,7 +10,7 @@ MARKER_END="# <<< pi-restech-setup <<<"
 KEY_ENV_NAME="RESTECH_API_KEY"
 KEY_URL_HINT="https://inference.restech.unsw.edu.au/ (Request access)"
 
-STAMP="$(date +%Y%m%d-%H%M%S)"   # single timestamp for every backup this run
+STAMP="$(date +%Y%m%d-%H%M%S)"
 MODE="install"
 FORCE_KEY=0
 VALIDATE=1
@@ -83,15 +79,6 @@ die()  { printf '\033[1;31m[pi-setup] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 command -v pi >/dev/null 2>&1 || die "pi not found on PATH. Install pi first (https://github.com/earendil-works/pi)."
 log "pi: $(command -v pi)"
 
-# ---------------------------------------------------------------------------
-# Shell init file detection (most robust across systems):
-#   - login shells: ~/.bash_profile / ~/.profile
-#   - interactive: ~/.bashrc / ~/.zshrc
-# We target the file that the user's *current interactive* shell actually
-# reads, with a source-guard block between markers so re-runs stay
-# idempotent. For bash we also make sure ~/.profile sources ~/.bashrc so
-# login-only sessions (ssh host, no tmux) pick it up.
-# ---------------------------------------------------------------------------
 detect_user_shell() {
   local name login_shell parent
   name="$(basename "${SHELL:-}")"
@@ -116,7 +103,6 @@ shell_init_files() {
 }
 
 env_file_value() {
-  # $1 = file, $2 = var name -> prints the value (quotes/space stripped), or nothing.
   local file="$1" name="$2" line
   [ -f "$file" ] || return 1
   line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${name}=" "$file" | tail -n1 || true)"
@@ -124,12 +110,9 @@ env_file_value() {
   printf '%s' "${line#*=}" | tr -d "\"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
-# Files a hand-written setup may legitimately load the key from. Checked only as a
-# last resort, and only by --check / read-only paths (never written to).
 KNOWN_KEY_FILES=("$HOME/.codex/.env" "$HOME/.config/pi/.env" "$HOME/.restech.env")
 
 detect_api_key() {
-  # Precedence for existing key: env var, then ~/.pi/.env, then known loader files.
   if [ -n "${!KEY_ENV_NAME:-}" ]; then
     printf '%s' "${!KEY_ENV_NAME}"
     return 0
@@ -138,7 +121,6 @@ detect_api_key() {
     local line
     line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${KEY_ENV_NAME}=" "$PI_ENV_FILE" | tail -n1 || true)"
     if [ -n "$line" ]; then
-      # strip optional 'export ', var name, '=', surrounding quotes
       printf '%s' "${line#*=}" | tr -d "\"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
       return 0
     fi
@@ -163,7 +145,6 @@ need_key() {
   [ "$MODE" = "install" ] && { [ "$FORCE_KEY" = "1" ] || [ -z "$EXISTING_KEY" ]; }
 }
 
-# Non-interactive keys can also be piped on stdin (for scripted installs).
 if need_key && [ ! -t 0 ] && [ -z "${RESTECH_API_KEY:-}" ] && [ -z "$EXISTING_KEY" ]; then
   ENTERED_KEY="$(head -n1)"
   NEW_KEY="$(printf '%s' "$ENTERED_KEY" | tr -d '"'"'" | tr -d '[:space:]')"
@@ -172,7 +153,6 @@ fi
 
 if need_key; then
   if [ ! -t 0 ]; then
-    # Non-interactive and nothing usable found.
     if [ -n "$EXISTING_KEY" ]; then
       NEW_KEY="$EXISTING_KEY"
     else
@@ -194,10 +174,6 @@ else
   NEW_KEY="$EXISTING_KEY"
 fi
 
-# Validate format lightly and verify the key live before writing anything, so we
-# never leave a broken config behind. --check is read-only and validates key
-# *reachability* later instead, so an unconfigured/alternate-loader key must not
-# abort the whole check here.
 if [ "$MODE" != "check" ]; then
   case "$NEW_KEY" in
     sk-*) : ;;
@@ -236,7 +212,6 @@ if [ "$MODE" = "install" ] && { [ -n "$NEW_KEY" ] && [ "$NEW_KEY" != "$EXISTING_
   umask 077
   touch "$PI_ENV_FILE"
   chmod 600 "$PI_ENV_FILE"
-  # Replace an existing RESTECH_API_KEY line in place, else append.
   if grep -qE "^[[:space:]]*(export[[:space:]]+)?${KEY_ENV_NAME}=" "$PI_ENV_FILE"; then
     tmp="$(mktemp)"
     sed -E "s|^[[:space:]]*(export[[:space:]]+)?${KEY_ENV_NAME}=.*|export ${KEY_ENV_NAME}=\"${NEW_KEY}\"|" "$PI_ENV_FILE" > "$tmp"
@@ -267,8 +242,6 @@ if [ "$MODE" = "install" ]; then
     log "Source block already present in $INIT_FILE - left as-is."
   fi
 
-  # For bash: ensure login shells (ssh without tmux, non-interactive
-  # profiles) also load ~/.bashrc, so the key is present there too.
   if [ "$(detect_user_shell)" = bash ]; then
     SHELL_PROFILE="$HOME/.profile"
     if [ -f "$SHELL_PROFILE" ] && ! grep -qE "bashrc" "$SHELL_PROFILE" 2>/dev/null; then
@@ -282,9 +255,6 @@ fi
 # 4b. Safety guards -- evaluated before any config is copied
 # ---------------------------------------------------------------------------
 
-# Hard stop if the repo/agent trees overlap: an odd REPO_DIR (e.g. the script
-# invoked via `bash -c` from inside the agent dir) would otherwise copy
-# $PI_AGENT_DIR onto itself and silently revert personal files like AGENTS.md.
 case "$REPO_DIR/agent" in
   "$PI_AGENT_DIR"|"$PI_AGENT_DIR"/*) die "REPO_DIR ($REPO_DIR) is inside $PI_AGENT_DIR -- refusing to sync." ;;
 esac
@@ -315,16 +285,13 @@ copy_tree() {
     log "Installed $(echo "$dst" | sed "s|$dst_root/||")"
   done < <(
     cd "$src_root"
-    # Strip ./ without GNU-only `sed -z`; this remains NUL-safe.
     while IFS= read -r -d '' found; do printf '%s\0' "${found#./}"; done \
       < <(find . -type f -print0) | excluded_files
   )
 }
 
-# AGENTS.md is user-owned; Pi and package commands update settings.json.
 PERSONAL_FILES="${PI_SETUP_PERSONAL_FILES:-AGENTS.md settings.json}"
 
-# Ignore Pi's runtime-only changelog marker and object-key formatting.
 settings_match_template() {
   node - "$REPO_DIR/agent/settings.json" "$PI_AGENT_DIR/settings.json" <<'NODE'
 const fs = require("fs");
@@ -353,14 +320,11 @@ NODE
 is_personal() {
   local rel="$1" pf base
   for pf in $PERSONAL_FILES; do
-    # Exact relative paths only. Basename matching silently excluded future
-    # shared files such as prompts/AGENTS.md.
     [ "$rel" = "$pf" ] && return 0
   done
   return 1
 }
 
-# Drop excluded entries from the find stream (NUL-delimited).
 excluded_files() {
   local rel
   while IFS= read -r -d '' rel; do
@@ -387,8 +351,6 @@ install_agents_file() {
     return
   fi
 
-  # Bootstrap upgrades from an older checkout by finding the exact template
-  # from which the personal copy originated.
   if [ ! -f "$base" ] && git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     candidate="$(mktemp)"
     while IFS= read -r rev; do
@@ -459,7 +421,6 @@ if [ "$MODE" = "install" ]; then
     copy_tree "$PROFILE_DIR" "$PI_AGENT_DIR"
     log "Applied host profile: $PROFILE"
   fi
-  # Never clobber a coworker's auth.json or models-store.json (regenerable cache).
   log "Config installed into $PI_AGENT_DIR"
 fi
 
@@ -493,26 +454,117 @@ fi
 # ---------------------------------------------------------------------------
 # 6. pi packages
 # ---------------------------------------------------------------------------
+
+tidy_host_provided_packages() {
+  local npm_root="$PI_AGENT_DIR/npm/node_modules"
+  [ -d "$npm_root" ] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+  node - "$npm_root" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const root = process.argv[2];
+const HOST = new Set([
+  "@earendil-works/pi-agent-core", "@earendil-works/pi-ai",
+  "@earendil-works/pi-coding-agent", "@earendil-works/pi-tui",
+  "@mariozechner/pi-agent-core", "@mariozechner/pi-ai",
+  "@mariozechner/pi-coding-agent", "@mariozechner/pi-tui",
+  "@sinclair/typebox", "typebox",
+]);
+const TYPEBOX = ["@sinclair/typebox", "typebox"];
+const IMPORT = /\bfrom\s+["']((?:@sinclair\/)?typebox(?:\/[^"']*)?)["']/g;
+const hostSpecifier = (spec) => HOST.has(spec)
+  || /^(?:@sinclair\/)?typebox\/(?:compile|value)$/.test(spec);
+
+function* packages(dir) {
+  let entries = [];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    if (entry.name.startsWith("@")) {
+      let sub = [];
+      try { sub = fs.readdirSync(path.join(dir, entry.name), { withFileTypes: true }); } catch { continue; }
+      for (const s of sub) if (s.isDirectory()) yield path.join(dir, entry.name, s.name);
+    } else {
+      yield path.join(dir, entry.name);
+    }
+  }
+}
+
+function onlyHostTypeboxImports(pkgDir) {
+  const walk = (dir) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (entry.name === "node_modules") continue;
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(p); continue; }
+      if (!/\.(ts|tsx|mts|js|mjs|cjs)$/.test(entry.name)) continue;
+      let text; try { text = fs.readFileSync(p, "utf8"); } catch { continue; }
+      for (const m of text.matchAll(IMPORT)) {
+        if (!hostSpecifier(m[1])) throw new Error(p);
+      }
+    }
+  };
+  try {
+    for (const sub of ["src", "dist"]) {
+      const d = path.join(pkgDir, sub);
+      if (fs.existsSync(d)) walk(d);
+    }
+  } catch { return false; }
+  return true;
+}
+
+let patched = 0;
+for (const pkgDir of packages(root)) {
+  const file = path.join(pkgDir, "package.json");
+  let m; try { m = JSON.parse(fs.readFileSync(file, "utf8")); } catch { continue; }
+  const deps = m.dependencies;
+  const hostDeps = deps && typeof deps === "object"
+    ? Object.keys(deps).filter((name) => HOST.has(name)) : [];
+  const typeboxInvolved = hostDeps.some((name) => TYPEBOX.includes(name))
+    || TYPEBOX.some((name) => m.peerDependencies?.[name] !== undefined);
+  if (hostDeps.length > 0) {
+    m.peerDependencies = m.peerDependencies || {};
+    for (const name of hostDeps) { delete deps[name]; m.peerDependencies[name] = "*"; }
+    fs.writeFileSync(file, JSON.stringify(m, null, 2) + "\n");
+    patched++;
+    console.log(`patched ${path.relative(root, pkgDir)}: ${hostDeps.join(", ")} -> peerDependencies "*"`);
+  }
+  if (!typeboxInvolved || !onlyHostTypeboxImports(pkgDir)) continue;
+  for (const name of TYPEBOX) {
+    for (const copy of [
+      path.join(root, ...name.split("/")),
+      path.join(pkgDir, "node_modules", ...name.split("/")),
+    ]) {
+      if (!fs.existsSync(copy)) continue;
+      fs.rmSync(copy, { recursive: true, force: true });
+      try { fs.rmdirSync(path.dirname(copy)); } catch {}
+      console.log(`pruned duplicate ${path.relative(root, copy)}`);
+    }
+  }
+}
+if (patched === 0) console.log("nothing to tidy");
+NODE
+}
+
 if [ "$MODE" = "install" ]; then
-  if pi list 2>/dev/null | grep -q "pi-subagents"; then
-    log "pi-subagents already installed."
-  else
-    log "Installing pi-subagents package..."
-    pi install npm:@tintinweb/pi-subagents@0.7.3
+  log "Installing/updating pi-subagents (latest release)..."
+  if ! pi install npm:@tintinweb/pi-subagents; then
+    warn "Could not install/update pi-subagents (offline?). Continuing with whatever is installed."
   fi
 
-  # Migrate older installs: notify.ts is now copied with the other extensions.
   if pi list 2>/dev/null | grep -qF "$REPO_DIR"; then
     log "Removing legacy local pi-notify package registration..."
     pi remove "$REPO_DIR"
   fi
 
-  # Package updates are independent from the pi binary update/pin decision.
   if [ "$UPDATE_PACKAGES" = "1" ]; then
     pi update --extensions || warn "Could not refresh installed pi packages."
   else
     log "Skipping package updates (--no-update-packages)."
   fi
+
+  tidy_host_provided_packages
 fi
 
 # ---------------------------------------------------------------------------
@@ -540,10 +592,6 @@ elif [ "$MODE" = "install" ]; then
   log "Tip: Ctrl+O toggles tool output expand/collapse in pi."
   log "Tip: vcs-guard.ts asks before any 'git push'/gh/npm publish; it never blocks local commits."
 else
-  # --check mode
-  # Verify the key is actually reachable, not that it lives in one specific file.
-  # install.sh puts it in ~/.pi/.env, but a hand-written loader (e.g. sourcing
-  # ~/.codex/.env from ~/.profile) is equally valid and must not fail the check.
   key_ok=0
   if [ -n "${!KEY_ENV_NAME:-}" ]; then
     key_ok=1
@@ -560,8 +608,6 @@ else
   [ "$key_ok" = 1 ] || die "Cannot find ${KEY_ENV_NAME} in the environment, $PI_ENV_FILE, or any known env file. Run ./install.sh."
   [ -f "$PI_AGENT_DIR/settings.json" ] || die "settings.json missing from $PI_AGENT_DIR."
   [ -f "$PI_AGENT_DIR/models.json" ] || die "models.json missing from $PI_AGENT_DIR."
-  # Personal files are never overwritten, so tell the user when their copy has
-  # drifted from the template (they may want the new bits by hand).
   for pf_ in $PERSONAL_FILES; do
     if [ -f "$REPO_DIR/agent/$pf_" ] && [ -f "$PI_AGENT_DIR/$pf_" ]; then
       if [ "$pf_" = "settings.json" ]; then
@@ -605,7 +651,6 @@ else
     log "Host profile $PROFILE is installed."
   fi
 
-  # The guard is a safety control, so verify its behavior as well as its copy.
   node "$REPO_DIR/tests/vcs-guard.test.cjs" >/dev/null 2>&1 || die "vcs-guard rules failed their test suite; do not rely on the guard."
   log "vcs-guard installed and its rule suite passes."
   if [ -f "$PI_ENV_FILE" ]; then
@@ -613,8 +658,6 @@ else
     [ "$perms" = "600" ] || warn "$PI_ENV_FILE mode is $perms (expected 600)."
   fi
   if ! grep -qF "$MARKER_BEGIN" "$(shell_init_files)" 2>/dev/null; then
-    # Not fatal: the key check above is the real test. A hand-written loader in
-    # another init file is supported, so only warn when the key is NOT reachable.
     warn "No installer block in $(shell_init_files). Fine if you wire ${KEY_ENV_NAME} up yourself (e.g. via ~/.profile); re-run ./install.sh to add it."
   fi
   log "Check passed: key reachable, agent config present, vcs-guard rules verified."

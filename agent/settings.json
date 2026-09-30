@@ -3,7 +3,7 @@
   "defaultProvider": "restech",
   "defaultModel": "qwen3.8-flash-next",
   "packages": [
-    "npm:@tintinweb/pi-subagents@0.7.3"
+    "npm:@tintinweb/pi-subagents"
   ],
   "enabledModels": [
     "restech/qwen3.8-flash-next",
