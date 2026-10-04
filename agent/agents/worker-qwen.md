@@ -2,6 +2,7 @@
 description: Independent Qwen implementation worker in an isolated worktree
 tools: read, bash, edit, write, grep, find, ls
 model: restech/qwen3.8-27b
+thinking: max
 max_turns: 0
 prompt_mode: append
 extensions: false

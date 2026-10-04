@@ -2,6 +2,7 @@
 description: Deep read-only implementation and regression review using GLM
 tools: read, bash, grep, find, ls
 model: restech/glm-5.3-flash
+thinking: medium
 max_turns: 100
 prompt_mode: replace
 extensions: false

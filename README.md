@@ -7,7 +7,9 @@ Shared [Pi](https://github.com/earendil-works/pi) configuration for the UNSW Res
 | Path | Purpose |
 | --- | --- |
 | `agent/models.json` | ResTech provider and model definitions; the API key is read from `RESTECH_API_KEY` |
-| `agent/settings.json` | Default model, thinking levels, and pi-subagents package |
+| `agent/settings.json` | Default model, thinking levels, enabled models, and pi-subagents package |
+| `agent/AGENTS.md` | Shared system-prompt template, three-way merged with local edits on install |
+| `agent/subagents.json` | Subagent concurrency and scheduling settings |
 | `agent/agents/` | Local workers, reviewers, and optional frontier escalation |
 | `agent/prompts/` | Reusable implementation and review prompts |
 | `agent/extensions/minimal-mode.ts` | Compact built-in tool rendering based on Pi's `minimal-mode.ts` example |
@@ -38,7 +40,7 @@ The installer:
 - validates and stores the API key in `~/.pi/.env` with mode `600`
 - adds a marked loader block to the active shell startup file
 - copies shared configuration to `~/.pi/agent/`, backing up replaced files
-- installs pi-subagents and pi-notify
+- installs the pi-subagents package and removes any legacy local pi-notify registration
 - updates Pi and packages unless disabled
 - runs a ResTech smoke test
 
@@ -68,7 +70,7 @@ pi --model restech/qwen3.8-27b
 pi --model restech/glm-5.3-flash
 ```
 
-- `Ctrl+O` toggles compact and expanded tool output.
+- Tool output is rendered compactly by `minimal-mode.ts`.
 - `/agents` lists named subagents.
 - `/handoff <goal>` creates a focused child session with an editable prompt.
 - Compaction uses `restech/qwen3.8-flash-next`, then `openai-codex/gpt-5.6-luna`, then the active model. Override the chain with comma-separated `PI_COMPACT_MODELS` entries.
@@ -77,11 +79,15 @@ pi --model restech/glm-5.3-flash
 
 | Model | Default thinking | Use |
 | --- | --- | --- |
-| `qwen3.8-flash-next` | `medium` | Default agent loops |
-| `qwen3.8-27b` | `medium` | General-purpose work |
-| `glm-5.3-flash` | `high` | Deeper reasoning |
+| `qwen3.8-flash-next` | `medium` | Short, non-agent tasks and single-pass summarization |
+| `qwen3.8-27b` | `max` | Format-sensitive work and structured-output review |
+| `glm-5.3-flash` | `low` | Responsive main-thread orchestration and general use |
 
-The configured endpoint accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Change the current level with `/thinking`.
+The `openai-codex/gpt-5.6-luna`, `-sol`, and `-terra` models are also enabled for optional frontier escalation.
+
+GLM implementation, review, and planning agents use `medium`; Qwen workers and reviewers use `max`; bounded exploration uses `low`. The configured endpoint accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Change the current level with `/thinking`.
+
+See [MODEL-BENCHMARK.md](MODEL-BENCHMARK.md) for the tool-use benchmark, limitations, and rationale behind these defaults.
 
 ## Remote-write guard
 

@@ -588,7 +588,7 @@ if [ "$MODE" = "install" ] && [ "$VALIDATE" = "1" ]; then
   log "Done. Open a NEW shell (or: source $INIT_FILE) and run 'pi' to start."
 elif [ "$MODE" = "install" ]; then
   log "Done (smoke test skipped). Open a NEW shell (or: source $INIT_FILE) and run 'pi' to start."
-  log "Tip: pi --model restech/qwen3.8-flash-next   (recommended default)"
+  log "Tip: pi --model restech/glm-5.3-flash --thinking low   (recommended default)"
   log "Tip: Ctrl+O toggles tool output expand/collapse in pi."
   log "Tip: vcs-guard.ts asks before any 'git push'/gh/npm publish; it never blocks local commits."
 else
