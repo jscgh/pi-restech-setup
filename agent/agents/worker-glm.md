@@ -2,7 +2,7 @@
 description: Strong local implementation worker using GLM in an isolated worktree
 tools: read, bash, edit, write, grep, find, ls
 model: restech/glm-5.3-flash
-thinking: medium
+thinking: low
 max_turns: 0
 prompt_mode: append
 extensions: false

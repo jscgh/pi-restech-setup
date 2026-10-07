@@ -4,11 +4,14 @@
 auth.json
 models-store.json
 
-# never commit chat history
+# never commit chat history or local benchmark data
 sessions/
+benchmark/
 
-# node/installer cruft
+# language/installer cruft
 node_modules/
+__pycache__/
+*.pyc
 
 # installer backups & editor/CLI detritus -- these are per-machine, never shared
 .backup-*/

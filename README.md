@@ -87,7 +87,7 @@ The `openai-codex/gpt-5.6-luna`, `-sol`, and `-terra` models are also enabled fo
 
 GLM implementation, review, and planning agents use `medium`; Qwen workers and reviewers use `max`; bounded exploration uses `low`. The configured endpoint accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Change the current level with `/thinking`.
 
-See [MODEL-BENCHMARK.md](MODEL-BENCHMARK.md) for the tool-use benchmark, limitations, and rationale behind these defaults.
+See [MODEL-BENCHMARK.md](MODEL-BENCHMARK.md) for the original tool-use benchmark, limitations, and rationale behind these defaults.
 
 ## Remote-write guard
 

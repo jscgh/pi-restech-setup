@@ -2,7 +2,7 @@
 description: Independent read-only second review using Qwen 27B
 tools: read, bash, grep, find, ls
 model: restech/qwen3.8-27b
-thinking: max
+thinking: high
 max_turns: 100
 prompt_mode: replace
 extensions: false

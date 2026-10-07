@@ -1,7 +1,7 @@
 ---
 description: Medium-effort GLM planner for architecture, decomposition, and consequential synthesis
 model: restech/glm-5.3-flash
-thinking: medium
+thinking: low
 tools: read, grep, find, ls, bash
 prompt_mode: replace
 extensions: false

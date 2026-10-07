@@ -20,7 +20,7 @@
     "openai-codex/gpt-5.6-sol": "low",
     "openai-codex/gpt-5.6-terra": "low",
     "restech/qwen3.8-flash-next": "medium",
-    "restech/qwen3.8-27b": "max",
+    "restech/qwen3.8-27b": "high",
     "restech/glm-5.3-flash": "low"
   }
 }
