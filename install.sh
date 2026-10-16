@@ -8,7 +8,13 @@ PI_ENV_FILE="$HOME/.pi/.env"
 MARKER_BEGIN="# >>> pi-restech-setup >>>"
 MARKER_END="# <<< pi-restech-setup <<<"
 KEY_ENV_NAME="RESTECH_API_KEY"
-KEY_URL_HINT="https://inference.restech.unsw.edu.au/ (Request access)"
+BASE_URL_ENV_NAME="RESTECH_API_BASE_URL"
+TEMP_PATHS=()
+
+cleanup_temp_paths() {
+  [ "${#TEMP_PATHS[@]}" -eq 0 ] || rm -rf -- "${TEMP_PATHS[@]}"
+}
+trap cleanup_temp_paths EXIT
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 MODE="install"
@@ -73,11 +79,49 @@ log()  { printf '\033[1;34m[pi-setup]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[pi-setup] WARN:\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m[pi-setup] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-# ---------------------------------------------------------------------------
-# 1. Prerequisites
-# ---------------------------------------------------------------------------
 command -v pi >/dev/null 2>&1 || die "pi not found on PATH. Install pi first (https://github.com/earendil-works/pi)."
+command -v node >/dev/null 2>&1 || die "node not found on PATH. Install Node.js first."
+command -v git >/dev/null 2>&1 || die "git not found on PATH. Install Git first."
+if [ "$MODE" = "install" ] && [ "$VALIDATE" = "1" ]; then
+  command -v curl >/dev/null 2>&1 || die "curl not found on PATH. Install curl or use --no-validate."
+  command -v timeout >/dev/null 2>&1 || die "timeout not found on PATH. Install GNU coreutils or use --no-validate."
+fi
 log "pi: $(command -v pi)"
+
+detect_base_url() {
+  if [ -n "${!BASE_URL_ENV_NAME:-}" ]; then
+    printf '%s' "${!BASE_URL_ENV_NAME}"
+    return 0
+  fi
+  if [ -f "$PI_AGENT_DIR/models.json" ]; then
+    node - "$PI_AGENT_DIR/models.json" <<'NODE'
+const fs = require("node:fs");
+const file = process.argv[2];
+try {
+  const value = JSON.parse(fs.readFileSync(file, "utf8")).providers?.restech?.baseUrl;
+  if (typeof value === "string" && value && !value.includes("__RESTECH_")) process.stdout.write(value);
+} catch {}
+NODE
+  fi
+}
+
+BASE_URL="$(detect_base_url || true)"
+if [ "$MODE" = "install" ] && [ -z "$BASE_URL" ]; then
+  if [ -t 0 ]; then
+    printf 'ResTech API base URL: '
+    read -r BASE_URL || die "Aborted."
+  else
+    die "No API base URL available. Set ${BASE_URL_ENV_NAME} for the first installation."
+  fi
+fi
+BASE_URL="${BASE_URL%/}"
+if [ "$MODE" = "install" ]; then
+  case "$BASE_URL" in
+    *[[:space:]]*|*[[:cntrl:]]*) die "The API base URL must not contain whitespace or control characters." ;;
+    https://*) : ;;
+    *) die "The API base URL must use HTTPS." ;;
+  esac
+fi
 
 detect_user_shell() {
   local name login_shell parent
@@ -103,11 +147,23 @@ shell_init_files() {
 }
 
 env_file_value() {
-  local file="$1" name="$2" line
+  local file="$1" name="$2"
   [ -f "$file" ] || return 1
-  line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${name}=" "$file" | tail -n1 || true)"
-  [ -n "$line" ] || return 1
-  printf '%s' "${line#*=}" | tr -d "\"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+  node - "$file" "$name" <<'NODE'
+const fs = require("node:fs");
+const [file, name] = process.argv.slice(2);
+const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const pattern = new RegExp(`^\\s*(?:export\\s+)?${escaped}=`);
+const line = fs.readFileSync(file, "utf8").split(/\r?\n/).filter((item) => pattern.test(item)).at(-1);
+if (!line) process.exit(1);
+let value = line.slice(line.indexOf("=") + 1).trim();
+if (value.startsWith("'") && value.endsWith("'")) {
+  value = value.slice(1, -1).replace(/'\\''/g, "'");
+} else if (value.startsWith('"') && value.endsWith('"')) {
+  value = value.slice(1, -1).replace(/\\(["\\$`])/g, "$1");
+}
+process.stdout.write(value);
+NODE
 }
 
 KNOWN_KEY_FILES=("$HOME/.codex/.env" "$HOME/.config/pi/.env" "$HOME/.restech.env")
@@ -117,15 +173,11 @@ detect_api_key() {
     printf '%s' "${!KEY_ENV_NAME}"
     return 0
   fi
-  if [ -f "$PI_ENV_FILE" ]; then
-    local line
-    line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${KEY_ENV_NAME}=" "$PI_ENV_FILE" | tail -n1 || true)"
-    if [ -n "$line" ]; then
-      printf '%s' "${line#*=}" | tr -d "\"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
-      return 0
-    fi
-  fi
   local f v
+  if v="$(env_file_value "$PI_ENV_FILE" "$KEY_ENV_NAME")" && [ -n "$v" ]; then
+    printf '%s' "$v"
+    return 0
+  fi
   for f in "${KNOWN_KEY_FILES[@]}"; do
     if v="$(env_file_value "$f" "$KEY_ENV_NAME")" && [ -n "$v" ]; then
       printf '%s' "$v"
@@ -135,32 +187,39 @@ detect_api_key() {
   return 1
 }
 
-# ---------------------------------------------------------------------------
-# 2. API key
-# ---------------------------------------------------------------------------
 EXISTING_KEY=""
+NEW_KEY=""
 EXISTING_KEY="$(detect_api_key || true)"
 
 need_key() {
   [ "$MODE" = "install" ] && { [ "$FORCE_KEY" = "1" ] || [ -z "$EXISTING_KEY" ]; }
 }
 
-if need_key && [ ! -t 0 ] && [ -z "${RESTECH_API_KEY:-}" ] && [ -z "$EXISTING_KEY" ]; then
+if need_key && [ ! -t 0 ] && [ -z "${RESTECH_API_KEY:-}" ] && { [ -z "$EXISTING_KEY" ] || [ "$FORCE_KEY" = "1" ]; }; then
   ENTERED_KEY="$(head -n1)"
-  NEW_KEY="$(printf '%s' "$ENTERED_KEY" | tr -d '"'"'" | tr -d '[:space:]')"
+  NEW_KEY="${ENTERED_KEY%$'\r'}"
+  case "$NEW_KEY" in
+    \"*\") NEW_KEY="${NEW_KEY:1:${#NEW_KEY}-2}" ;;
+    \'*\') NEW_KEY="${NEW_KEY:1:${#NEW_KEY}-2}" ;;
+  esac
   [ -n "$NEW_KEY" ] || die "Empty key on stdin."
+  case "$NEW_KEY" in
+    *[[:space:]]*) die "Key contains whitespace - pipe the bare sk-... value." ;;
+  esac
 fi
 
 if need_key; then
   if [ ! -t 0 ]; then
-    if [ -n "$EXISTING_KEY" ]; then
+    if [ -n "$NEW_KEY" ]; then
+      :
+    elif [ -n "$EXISTING_KEY" ]; then
       NEW_KEY="$EXISTING_KEY"
     else
       die "No TTY and no ${KEY_ENV_NAME} available. Set ${KEY_ENV_NAME}=sk-... in the environment, pipe the key on stdin, or run install.sh interactively."
     fi
   else
     log "Enter your ResTech Local Inference API key (looks like: sk-...)."
-    log "Get one via 'Request access' at https://inference.restech.unsw.edu.au/"
+    log "Use the key supplied through the ResTech access process."
     printf 'Key (hidden, empty line to abort): '
     read -rs ENTERED_KEY || die "Aborted."
     echo
@@ -186,45 +245,50 @@ validate_key_live() {
   local body
   body="{\"model\":\"qwen3.8-flash-next\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":8,\"stream\":false}"
   local http_code
-  http_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
-    -H "Authorization: Bearer ${key}" -H 'Content-Type: application/json' \
-    -d "$body" https://inference.restech.unsw.edu.au/v1/chat/completions)"
+  http_code="$(printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$key" | \
+    curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+    -H @- -d "$body" "$BASE_URL/chat/completions")"
   case "$http_code" in
     200) return 0 ;;
     401|403) die "Key rejected by the gateway (HTTP $http_code). Double-check you pasted the full sk-... key." ;;
-    000) warn "Could not reach the gateway (network?). Continuing; validation skipped." ;;
-    *)   warn "Unexpected HTTP $http_code from the gateway; key may still be OK (endpoint status can be transient). Continuing." ;;
+    000) warn "Could not reach the gateway (network?). Continuing; validation skipped."; return 2 ;;
+    *)   warn "Unexpected HTTP $http_code from the gateway; key may still be OK (endpoint status can be transient). Continuing."; return 2 ;;
   esac
 }
 
 if [ "$MODE" = "install" ] && [ "$VALIDATE" = "1" ]; then
-  validate_key_live "$NEW_KEY"
-  log "Key accepted by the gateway."
+  if validate_key_live "$NEW_KEY"; then
+    log "Key accepted by the gateway."
+  fi
 elif [ "$MODE" = "install" ]; then
   warn "Live key validation skipped (--no-validate)."
 fi
 
-# ---------------------------------------------------------------------------
-# 3. Write ~/.pi/.env with strict permissions
-# ---------------------------------------------------------------------------
 if [ "$MODE" = "install" ] && { [ -n "$NEW_KEY" ] && [ "$NEW_KEY" != "$EXISTING_KEY" ] || [ "$FORCE_KEY" = "1" ] || [ ! -f "$PI_ENV_FILE" ]; }; then
   mkdir -p "$(dirname "$PI_ENV_FILE")"
+  previous_umask="$(umask)"
   umask 077
   touch "$PI_ENV_FILE"
   chmod 600 "$PI_ENV_FILE"
+  escaped_key="${NEW_KEY//\'/\'\\\'\'}"
   if grep -qE "^[[:space:]]*(export[[:space:]]+)?${KEY_ENV_NAME}=" "$PI_ENV_FILE"; then
     tmp="$(mktemp)"
-    sed -E "s|^[[:space:]]*(export[[:space:]]+)?${KEY_ENV_NAME}=.*|export ${KEY_ENV_NAME}=\"${NEW_KEY}\"|" "$PI_ENV_FILE" > "$tmp"
-    cat "$tmp" > "$PI_ENV_FILE"; rm -f "$tmp"
+    while IFS= read -r line || [ -n "$line" ]; do
+      if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?${KEY_ENV_NAME}= ]]; then
+        printf "export %s='%s'\\n" "$KEY_ENV_NAME" "$escaped_key"
+      else
+        printf '%s\n' "$line"
+      fi
+    done < "$PI_ENV_FILE" > "$tmp"
+    cat "$tmp" > "$PI_ENV_FILE"
+    rm -f "$tmp"
   else
-    printf 'export %s="%s"\n' "$KEY_ENV_NAME" "$NEW_KEY" >> "$PI_ENV_FILE"
+    printf "export %s='%s'\\n" "$KEY_ENV_NAME" "$escaped_key" >> "$PI_ENV_FILE"
   fi
+  umask "$previous_umask"
   log "Wrote key to $PI_ENV_FILE (mode 600)."
 fi
 
-# ---------------------------------------------------------------------------
-# 4. Shell init: guarded export block (idempotent)
-# ---------------------------------------------------------------------------
 INIT_FILE="$(shell_init_files)"
 log "Shell init file: $INIT_FILE"
 
@@ -251,9 +315,6 @@ if [ "$MODE" = "install" ]; then
   fi
 fi
 
-# ---------------------------------------------------------------------------
-# 4b. Safety guards -- evaluated before any config is copied
-# ---------------------------------------------------------------------------
 
 case "$REPO_DIR/agent" in
   "$PI_AGENT_DIR"|"$PI_AGENT_DIR"/*) die "REPO_DIR ($REPO_DIR) is inside $PI_AGENT_DIR -- refusing to sync." ;;
@@ -263,17 +324,32 @@ case "$PI_AGENT_DIR" in
 esac
 [ -d "$REPO_DIR/agent" ] || die "REPO_DIR ($REPO_DIR) has no agent/ dir -- is this the pi-restech-setup repo?"
 
-# ---------------------------------------------------------------------------
-# 5. Copy agent config into ~/.pi/agent/ (backup-then-copy, per file)
-# ---------------------------------------------------------------------------
+render_models() {
+  RESTECH_API_BASE_URL="$BASE_URL" node - "$1" "$2" <<'NODE'
+const fs = require("node:fs");
+const [source, destination] = process.argv.slice(2);
+const value = JSON.parse(fs.readFileSync(source, "utf8"));
+value.providers.restech.baseUrl = process.env.RESTECH_API_BASE_URL;
+fs.writeFileSync(destination, `${JSON.stringify(value, null, 2)}\n`);
+NODE
+}
+
 copy_tree() {
-  local src_root="$1" dst_root="$2" rel src dst bak
+  local src_root="$1" dst_root="$2" rel src dst bak generated
   mkdir -p "$dst_root"
   while IFS= read -r -d '' rel; do
     local src="$src_root/$rel" dst="$dst_root/$rel"
+    generated=""
+    if [ "$src_root" = "$REPO_DIR/agent" ] && [ "$rel" = "models.json" ]; then
+      generated="$(mktemp)"
+      TEMP_PATHS+=("$generated")
+      render_models "$src" "$generated"
+      src="$generated"
+    fi
     mkdir -p "$(dirname "$dst")"
     if [ -f "$dst" ]; then
       if cmp -s "$src" "$dst"; then
+        [ -z "$generated" ] || rm -f "$generated"
         continue
       fi
       bak="$dst_root/.backup-$STAMP/$rel"
@@ -282,6 +358,7 @@ copy_tree() {
       log "Backed up existing ${rel} -> $bak"
     fi
     cp -p "$src" "$dst"
+    [ -z "$generated" ] || rm -f "$generated"
     log "Installed $(echo "$dst" | sed "s|$dst_root/||")"
   done < <(
     cd "$src_root"
@@ -424,9 +501,6 @@ if [ "$MODE" = "install" ]; then
   log "Config installed into $PI_AGENT_DIR"
 fi
 
-# ---------------------------------------------------------------------------
-# 5b. Update Pi
-# ---------------------------------------------------------------------------
 if [ "$MODE" = "install" ]; then
   if [ "$UPDATE_PI" = "1" ]; then
     before="$(pi --version 2>/dev/null | tail -n1 | tr -d '[:space:]' || true)"
@@ -451,101 +525,6 @@ if [ "$MODE" = "install" ]; then
   fi
 fi
 
-# ---------------------------------------------------------------------------
-# 6. pi packages
-# ---------------------------------------------------------------------------
-
-tidy_host_provided_packages() {
-  local npm_root="$PI_AGENT_DIR/npm/node_modules"
-  [ -d "$npm_root" ] || return 0
-  command -v node >/dev/null 2>&1 || return 0
-  node - "$npm_root" <<'NODE'
-const fs = require("fs");
-const path = require("path");
-const root = process.argv[2];
-const HOST = new Set([
-  "@earendil-works/pi-agent-core", "@earendil-works/pi-ai",
-  "@earendil-works/pi-coding-agent", "@earendil-works/pi-tui",
-  "@mariozechner/pi-agent-core", "@mariozechner/pi-ai",
-  "@mariozechner/pi-coding-agent", "@mariozechner/pi-tui",
-  "@sinclair/typebox", "typebox",
-]);
-const TYPEBOX = ["@sinclair/typebox", "typebox"];
-const IMPORT = /\bfrom\s+["']((?:@sinclair\/)?typebox(?:\/[^"']*)?)["']/g;
-const hostSpecifier = (spec) => HOST.has(spec)
-  || /^(?:@sinclair\/)?typebox\/(?:compile|value)$/.test(spec);
-
-function* packages(dir) {
-  let entries = [];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-    if (entry.name.startsWith("@")) {
-      let sub = [];
-      try { sub = fs.readdirSync(path.join(dir, entry.name), { withFileTypes: true }); } catch { continue; }
-      for (const s of sub) if (s.isDirectory()) yield path.join(dir, entry.name, s.name);
-    } else {
-      yield path.join(dir, entry.name);
-    }
-  }
-}
-
-function onlyHostTypeboxImports(pkgDir) {
-  const walk = (dir) => {
-    let entries = [];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const entry of entries) {
-      if (entry.name === "node_modules") continue;
-      const p = path.join(dir, entry.name);
-      if (entry.isDirectory()) { walk(p); continue; }
-      if (!/\.(ts|tsx|mts|js|mjs|cjs)$/.test(entry.name)) continue;
-      let text; try { text = fs.readFileSync(p, "utf8"); } catch { continue; }
-      for (const m of text.matchAll(IMPORT)) {
-        if (!hostSpecifier(m[1])) throw new Error(p);
-      }
-    }
-  };
-  try {
-    for (const sub of ["src", "dist"]) {
-      const d = path.join(pkgDir, sub);
-      if (fs.existsSync(d)) walk(d);
-    }
-  } catch { return false; }
-  return true;
-}
-
-let patched = 0;
-for (const pkgDir of packages(root)) {
-  const file = path.join(pkgDir, "package.json");
-  let m; try { m = JSON.parse(fs.readFileSync(file, "utf8")); } catch { continue; }
-  const deps = m.dependencies;
-  const hostDeps = deps && typeof deps === "object"
-    ? Object.keys(deps).filter((name) => HOST.has(name)) : [];
-  const typeboxInvolved = hostDeps.some((name) => TYPEBOX.includes(name))
-    || TYPEBOX.some((name) => m.peerDependencies?.[name] !== undefined);
-  if (hostDeps.length > 0) {
-    m.peerDependencies = m.peerDependencies || {};
-    for (const name of hostDeps) { delete deps[name]; m.peerDependencies[name] = "*"; }
-    fs.writeFileSync(file, JSON.stringify(m, null, 2) + "\n");
-    patched++;
-    console.log(`patched ${path.relative(root, pkgDir)}: ${hostDeps.join(", ")} -> peerDependencies "*"`);
-  }
-  if (!typeboxInvolved || !onlyHostTypeboxImports(pkgDir)) continue;
-  for (const name of TYPEBOX) {
-    for (const copy of [
-      path.join(root, ...name.split("/")),
-      path.join(pkgDir, "node_modules", ...name.split("/")),
-    ]) {
-      if (!fs.existsSync(copy)) continue;
-      fs.rmSync(copy, { recursive: true, force: true });
-      try { fs.rmdirSync(path.dirname(copy)); } catch {}
-      console.log(`pruned duplicate ${path.relative(root, copy)}`);
-    }
-  }
-}
-if (patched === 0) console.log("nothing to tidy");
-NODE
-}
 
 if [ "$MODE" = "install" ]; then
   log "Installing/updating pi-subagents (latest release)..."
@@ -564,22 +543,25 @@ if [ "$MODE" = "install" ]; then
     log "Skipping package updates (--no-update-packages)."
   fi
 
-  tidy_host_provided_packages
 fi
 
-# ---------------------------------------------------------------------------
-# 7. Smoke test + check mode
-# ---------------------------------------------------------------------------
 smoke_test() {
   log "Running live smoke test (pi -p)..."
-  local out
-  if ! out="$(cd /tmp && env -i HOME="$HOME" PATH="$PATH" TERM=xterm \
-      RESTECH_API_KEY="$NEW_KEY" \
+  local out smoke_parent smoke_dir
+  smoke_parent="${PI_SETUP_SMOKE_DIR:-$HOME/.cache/pi-restech-setup}"
+  mkdir -p "$smoke_parent"
+  smoke_dir="$(mktemp -d "$smoke_parent/smoke.XXXXXX")"
+  TEMP_PATHS+=("$smoke_dir")
+  if ! out="$(cd "$smoke_dir" && env -i HOME="$HOME" PATH="$PATH" TERM=xterm \
+      PI_CODING_AGENT_DIR="$PI_AGENT_DIR" RESTECH_API_KEY="$NEW_KEY" \
       timeout 60 pi --no-session --model restech/qwen3.8-flash-next -p "Reply with just: ok" 2>&1)"; then
+    rm -rf "$smoke_dir"
     printf '%s\n' "$out" | head -5
     die "Smoke test failed - check the output above."
   fi
-  printf '%s\n' "$out" | grep -qi "ok" || { printf '%s\n' "$out" | head -5; die "Smoke test returned unexpected output."; }
+  rm -rf "$smoke_dir"
+  out="${out//$'\r'/}"
+  [ "${out,,}" = "ok" ] || { printf '%s\n' "$out" | head -5; die "Smoke test returned unexpected output."; }
   log "Smoke test passed: pi + restech model are working."
 }
 
@@ -633,8 +615,19 @@ else
 
   while IFS= read -r -d '' shared_rel; do
     [ -f "$PI_AGENT_DIR/$shared_rel" ] || die "Shared config missing: $PI_AGENT_DIR/$shared_rel"
-    cmp -s "$REPO_DIR/agent/$shared_rel" "$PI_AGENT_DIR/$shared_rel" \
-      || die "Shared config differs: $PI_AGENT_DIR/$shared_rel; run ./install.sh to update it."
+    if [ "$shared_rel" = "models.json" ]; then
+      check_models="$(mktemp)"
+      TEMP_PATHS+=("$check_models")
+      render_models "$REPO_DIR/agent/models.json" "$check_models"
+      cmp -s "$check_models" "$PI_AGENT_DIR/models.json" || {
+        rm -f "$check_models"
+        die "Shared config differs: $PI_AGENT_DIR/models.json; run ./install.sh to update it."
+      }
+      rm -f "$check_models"
+    else
+      cmp -s "$REPO_DIR/agent/$shared_rel" "$PI_AGENT_DIR/$shared_rel" \
+        || die "Shared config differs: $PI_AGENT_DIR/$shared_rel; run ./install.sh to update it."
+    fi
   done < <(
     cd "$REPO_DIR/agent"
     while IFS= read -r -d '' found; do printf '%s\0' "${found#./}"; done \
@@ -660,5 +653,5 @@ else
   if ! grep -qF "$MARKER_BEGIN" "$(shell_init_files)" 2>/dev/null; then
     warn "No installer block in $(shell_init_files). Fine if you wire ${KEY_ENV_NAME} up yourself (e.g. via ~/.profile); re-run ./install.sh to add it."
   fi
-  log "Check passed: key reachable, agent config present, vcs-guard rules verified."
+  log "Check passed: key found, agent config present, vcs-guard rules verified."
 fi

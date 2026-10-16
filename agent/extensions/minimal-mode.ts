@@ -1,8 +1,3 @@
-/**
- * Based on Pi's examples/extensions/minimal-mode.ts.
- * Adds one-line tinted calls, compact errors, and width-safe truncation.
- */
-
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	createBashTool,
@@ -61,7 +56,6 @@ class TintedLine implements Component {
 	}
 
 	render(width: number): string[] {
-		// An empty component must occupy no terminal row.
 		if (!this.text) return [];
 		if (this.cachedLines === undefined || this.cachedWidth !== width) {
 			let line = truncateToWidth(this.text, Math.max(1, width), "…");
@@ -98,7 +92,7 @@ function getBuiltInTools(cwd: string) {
 
 function firstText(result: { content: Array<{ type: string; text?: string }> }): string {
 	const textContent = result.content.find((c) => c.type === "text" && c.text);
-	return textContent && textContent.type === "text" ? textContent.text : "";
+	return textContent?.text ?? "";
 }
 
 function stateBg(theme: any, context: any): (text: string) => string {

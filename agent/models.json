@@ -1,7 +1,7 @@
 {
   "providers": {
     "restech": {
-      "baseUrl": "https://inference.restech.unsw.edu.au/v1",
+      "baseUrl": "__RESTECH_API_BASE_URL__",
       "apiKey": "$RESTECH_API_KEY",
       "api": "openai-completions",
       "models": [

@@ -71,7 +71,7 @@ export default function (pi: ExtensionAPI) {
 		if (generating || pi.getSessionName()) return;
 		const prompt = firstMessage(ctx, "user");
 		const response = firstMessage(ctx, "assistant");
-		if (!prompt || !response) return;
+		if (!prompt || !response || !ctx.model) return;
 
 		generating = true;
 		let title: string | undefined;

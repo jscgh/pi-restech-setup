@@ -1,11 +1,7 @@
-/** Confirm remote writes and block writes to guard-critical files. */
-
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-// Explicit boundaries avoid matching names such as git-push.md.
 const tok = (w: string) => String.raw`(?<![A-Za-z0-9._-])(?:${w})(?![A-Za-z])`;
 
-// Restrict subcommand matching to the next argument.
 const ARG = String.raw`\s+`;
 
 const STAY = "[^\\n;|&]*?";
@@ -49,7 +45,7 @@ const RULES: Rule[] = [
 	{ re: new RegExp(`${tok("cargo")}${ARG}${tok("publish")}`), why: "cargo publish" },
 	{ re: new RegExp(`${tok("uv")}${ARG}${tok("publish")}`), why: "uv publish" },
 	{ re: new RegExp(`${tok("twine|maturin")}${ARG}${tok("upload")}`), why: "artifact upload" },
-	{ re: new RegExp(`${tok("mvn|mvnw|gradlew?|sbt")}${ARG}${tok("deploy")}`), why: "build publish goal" },
+	{ re: new RegExp(`${tok("mvn|mvnw|gradle|gradlew|sbt")}${STAY}${tok("deploy|publish|uploadArchives")}`), why: "build publish goal" },
 	{ re: new RegExp(`${tok("docker")}${ARG}${tok("push")}`), why: "docker push publishes an image" },
 	{ re: new RegExp(`${tok("podman|buildah|oras|nerdctl|singularity|apptainer")}${ARG}${tok("push")}`), why: "image push" },
 	{ re: new RegExp(`${tok("helm")}${ARG}${tok("push")}`), why: "chart push" },
@@ -63,8 +59,16 @@ const RULES: Rule[] = [
 		re: new RegExp(`${tok("helm")}${ARG}${tok("install|upgrade|uninstall|rollback")}`),
 		why: "helm mutates a live cluster",
 	},
-	{ re: new RegExp(`${tok("aws")}${ARG}\\w+${tok("create|delete|put|update")}-?\\w+`), why: "aws CLI mutates infrastructure" },
-	{ re: new RegExp(`${tok("gcloud")}${ARG}\\S+`), why: "gcloud subcommand — review before allowing" },
+	{
+		re: new RegExp(`${tok("aws")}${STAY}${tok("(?:create|delete|put|update|modify|terminate|run|start|stop|reboot|attach|detach|associate|disassociate|authorize|revoke|register|deregister|enable|disable|tag|untag|set|reset|restore|import|deploy|copy|upload|complete|abort)(?:-[A-Za-z0-9]+)*")}`),
+		why: "aws CLI mutates infrastructure",
+	},
+	{ re: new RegExp(`${tok("aws")}${STAY}${tok("s3")}${ARG}${tok("cp|mv|rm|sync|website")}`), why: "aws s3 writes or deletes objects" },
+	{
+		re: new RegExp(`${tok("gcloud")}${STAY}${tok("create|delete|update|deploy|submit|cancel|start|stop|reset|resize|move|restore|import|add-iam-policy-binding|remove-iam-policy-binding|set-iam-policy")}`),
+		why: "gcloud mutates infrastructure",
+	},
+	{ re: new RegExp(`${tok("gcloud")}${STAY}${tok("storage")}${ARG}${tok("cp|mv|rm|rsync")}`), why: "gcloud storage writes or deletes objects" },
 
 	{
 		re: new RegExp(`${tok("curl")}${STAY}${tok("-X|--request")}${ARG}${tok("POST|PUT|PATCH|DELETE")}`),
@@ -77,7 +81,6 @@ const RULES: Rule[] = [
 	},
 ];
 
-// These files cannot be written even after confirmation.
 const PROTECTED_FILE_DEFAULTS = [
 	"(^|/)[.]bashrc$",
 	"(^|/)[.]zshrc$",
@@ -106,13 +109,13 @@ export default function (pi: ExtensionAPI) {
 	const protectedFiles = (process.env.PI_VCS_PROTECTED_FILES ? process.env.PI_VCS_PROTECTED_FILES.split(",") : PROTECTED_FILE_DEFAULTS)
 		.map((src) => new RegExp(src));
 
-	const shellTools = new Set(["bash", "exec", "shell", "run_command"]);
+	const shellTools = new Set(["bash", "powershell", "exec", "shell", "run_command"]);
 
 	pi.on("tool_call", async (event, ctx) => {
 		const tool = event.toolName.toLowerCase();
 
 		if (shellTools.has(tool)) {
-			const command = String(event.input.command ?? event.input.cmd ?? "");
+			const command = String(inputField(event.input, "command") ?? inputField(event.input, "cmd") ?? "");
 			for (const rule of RULES) {
 				if (rule.re.test(command)) {
 					return await ask(ctx, `${rule.why}\n\n  ${command.slice(0, 400)}`);
@@ -121,8 +124,8 @@ export default function (pi: ExtensionAPI) {
 			return undefined;
 		}
 
-		if (tool === "edit" || tool === "write" || tool === "multiedit" || tool === "notebookedit") {
-			const path = String(event.input.path ?? event.input.notebook_path ?? "");
+		if (tool === "edit" || tool === "write") {
+			const path = String(inputField(event.input, "path") ?? inputField(event.input, "notebook_path") ?? "");
 			if (protectedFiles.some((re) => re.test(path))) {
 				return {
 					block: true,
@@ -134,6 +137,10 @@ export default function (pi: ExtensionAPI) {
 		}
 		return undefined;
 	});
+}
+
+function inputField(input: unknown, name: string): unknown {
+	return typeof input === "object" && input !== null ? (input as Record<string, unknown>)[name] : undefined;
 }
 
 async function ask(ctx: Parameters<Parameters<ExtensionAPI["on"]>[1]>[1], prompt: string) {

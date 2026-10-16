@@ -1,20 +1,22 @@
-/**
- * Based on Pi's examples/extensions/notify.ts.
- * Adds a TTY guard, a BEL fallback, and environment-variable opt-outs.
- */
-
+import { execFile } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+function powershellLiteral(value: string): string {
+	return value.replace(/'/g, "''");
+}
 
 function windowsToastScript(title: string, body: string): string {
 	const type = "Windows.UI.Notifications";
 	const mgr = `[${type}.ToastNotificationManager, ${type}, ContentType = WindowsRuntime]`;
 	const template = `[${type}.ToastTemplateType]::ToastText01`;
 	const toast = `[${type}.ToastNotification]::new($xml)`;
+	const safeTitle = powershellLiteral(title);
+	const safeBody = powershellLiteral(body);
 	return [
 		`${mgr} > $null`,
 		`$xml = [${type}.ToastNotificationManager]::GetTemplateContent(${template})`,
-		`$xml.GetElementsByTagName('text')[0].AppendChild($xml.CreateTextNode('${body}')) > $null`,
-		`[${type}.ToastNotificationManager]::CreateToastNotifier('${title}').Show(${toast})`,
+		`$xml.GetElementsByTagName('text')[0].AppendChild($xml.CreateTextNode('${safeBody}')) > $null`,
+		`[${type}.ToastNotificationManager]::CreateToastNotifier('${safeTitle}').Show(${toast})`,
 	].join("; ");
 }
 
@@ -23,13 +25,11 @@ function notifyOSC777(title: string, body: string): void {
 }
 
 function notifyOSC99(title: string, body: string): void {
-	// Kitty OSC 99 uses separate title and body frames.
 	process.stdout.write(`\x1b]99;i=1:d=0;${title}\x1b\\`);
 	process.stdout.write(`\x1b]99;i=1:p=body;${body}\x1b\\`);
 }
 
 function notifyWindows(title: string, body: string): void {
-	const { execFile } = require("child_process");
 	execFile("powershell.exe", ["-NoProfile", "-Command", windowsToastScript(title, body)]);
 }
 
@@ -52,7 +52,7 @@ export default function (pi: ExtensionAPI): void {
 				process.stdout.write("\x07");
 			}
 		} catch {
-			// Notification failures must not interrupt the agent.
+			return;
 		}
 	});
 }

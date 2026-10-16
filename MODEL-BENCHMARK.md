@@ -4,7 +4,7 @@ This benchmark evaluates model behaviour for scientific workflow development thr
 
 ## Method
 
-The benchmark has two related campaigns:
+The benchmark has two related campaigns conducted between 4 and 8 October 2026 against the ResTech service and model versions available during that period:
 
 1. **Thinking-level sweep:** 21 configurations (three ResTech models × seven thinking levels), two focused repository tasks each, for 42 candidate runs. Each candidate ran in a fresh checkout and home directory under Bubblewrap filesystem isolation. The candidate was limited to 25 tool calls and four minutes. GPT-5.6 Sol adjudicated valid outputs.
 2. **Finalist replication:** five configurations × four representative repository tasks × three repetitions, for 60 candidate runs:
@@ -21,7 +21,7 @@ The replicated tasks were:
 - `review-ood-scratch-maintenance` — review quota monitoring, cleanup, cache scope and scheduler safety;
 - `review-kod-wisps-output-claims` — review output-claim races, stale reclamation and retry safety.
 
-The replication used fresh contexts, real repository checkouts, tool-call and wall-time limits, and one Sol adjudication per candidate. Invalid Bubblewrap mount failures were removed and rerun; the final dataset contains no infrastructure-error runs. The final report and raw artifacts are in the Katana results directory.
+The replication used fresh contexts, real repository checkouts, tool-call and wall-time limits, and one Sol adjudication per candidate. Invalid Bubblewrap mount failures were removed and rerun; the final dataset contains no infrastructure-error runs. Task-repository revisions, the generated report, and raw artifacts are retained privately and are not included here, so this summary is not independently reproducible.
 
 Scores are adjudicator scores from 0–100, not a percentage accuracy metric. A timeout or tool-limit result can still receive a nonzero score if the candidate produced a useful patch or review, but completion reliability is reported separately.
 
@@ -54,7 +54,7 @@ Task-specific patches and review findings are retained in the per-run artifacts 
 
 ### Distributable/team settings
 
-This document describes the shared, local-only routing profile:
+For the tested October 2026 service snapshot, the results support this shared routing profile:
 
 - **Default:** GLM-5.3-Flash low.
 - **Plan, implementation and review:** GLM-low unless a second opinion is needed.
@@ -75,5 +75,5 @@ No hard turn limits were added to production agents. Benchmark limits remain mea
 - Sol adjudication itself introduces some noise and consumes substantially more subscription quota than Luna candidate runs.
 - No fixed seed was used: this is intentional because the goal is real-world operating behaviour, not deterministic replay.
 - Ruby and Nextflow validation availability differed by environment; skipped or unavailable validators are recorded in run artifacts.
-- The endpoint page advertises model context sizes and hardware, but does not publish quantization or KV-cache formats.
+- Context sizes and hardware came from provider documentation; quantization, KV-cache formats, and exact serving revisions were not available for independent verification.
 - Model and serving updates can change these conclusions. Re-run a smaller replicated finalist set after consequential endpoint changes.

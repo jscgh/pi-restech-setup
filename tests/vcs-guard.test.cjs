@@ -1,14 +1,4 @@
 #!/usr/bin/env node
-/**
- * Test harness for agent/extensions/vcs-guard.ts
- *
- * Pi loads extensions with jiti, so this extracts the RULES/protected-path
- * tables straight out of the TypeScript source and evaluates them -- no build
- * step, and the test can never drift from the shipped file.
- *
- *   node tests/vcs-guard.test.cjs          # run
- *   node --test tests/                     # via the node test runner
- */
 
 'use strict';
 
@@ -20,7 +10,6 @@ const assert = require('node:assert/strict');
 const EXT = path.join(__dirname, '..', 'agent', 'extensions', 'vcs-guard.ts');
 const source = fs.readFileSync(EXT, 'utf8');
 
-/** Slice out a top-level table and drop the type annotations. */
 function extract(startMarker, endMarker) {
 	const start = source.indexOf(startMarker);
 	const end = source.indexOf(endMarker, start);
@@ -35,8 +24,8 @@ function extract(startMarker, endMarker) {
 
 function loadInContext(names) {
 	const code = [
-		extract('const tok =', '// These files cannot be written'),
-		extract('// These files cannot be written', 'export default'),
+		extract('const tok =', 'const PROTECTED_FILE_DEFAULTS ='),
+		extract('const PROTECTED_FILE_DEFAULTS =', 'export default'),
 	].join('\n');
 	const exported = names.map((n) => `exports.${n} = ${n};`).join('\n');
 	const box = {};
@@ -48,16 +37,8 @@ const { RULES, PROTECTED_FILE_DEFAULTS } = loadInContext(['RULES', 'PROTECTED_FI
 
 const PROTECTED = PROTECTED_FILE_DEFAULTS.map((s) => new RegExp(s));
 
-/** A remote write is flagged if any rule matches. */
 const flagsRemoteWrite = (cmd) => RULES.some((r) => r.re.test(cmd));
 const touchesProtectedFile = (p) => PROTECTED.some((re) => re.test(p));
-
-// ---------------------------------------------------------------------------
-// Cases. `push` = must be flagged for approval.
-// `commit` and friends must NEVER be flagged: this is the regression that
-// motivated the whole suite (ARG was once `\s+\S+`, which consumed the
-// subcommand word and silently disabled every gh/glab/npm/cargo rule).
-// ---------------------------------------------------------------------------
 
 const MUST_FLAG = [
 	'git push origin main',
@@ -87,6 +68,18 @@ const MUST_FLAG = [
 	'uv publish',
 	'mvn deploy',
 	'./gradlew deploy',
+	'gradle publish',
+	'aws s3 cp report.csv s3://bucket/report.csv',
+	'aws s3 sync results/ s3://bucket/results/',
+	'aws s3api put-object --bucket bucket --key result',
+	'aws s3api copy-object --copy-source source/key --bucket bucket --key key',
+	'aws s3api upload-part --bucket bucket --key key --part-number 1',
+	'aws cloudformation deploy --template-file stack.yml --stack-name example',
+	'aws ec2 delete-instances --instance-ids i-123',
+	'aws iam create-user --user-name test',
+	'gcloud compute instances delete worker-1',
+	'gcloud projects add-iam-policy-binding project-id',
+	'gcloud storage rsync results gs://bucket/results',
 	'docker push reg/img:tag',
 	'podman push quay.io/o/i',
 	'helm push chart.tgz oci://x',
@@ -102,7 +95,6 @@ const MUST_FLAG = [
 ];
 
 const MUST_NOT_FLAG = [
-	// git local workflow -- the point of the guard is to leave these alone
 	'git status',
 	'git commit -m "fix: off-by-one"',
 	'git add -A && git commit -m x',
@@ -120,7 +112,6 @@ const MUST_NOT_FLAG = [
 	'git tag -a v1.0.0 -m msg',
 	'git worktree add ../wt',
 	'git rm --cached secret.txt',
-	// read-only host CLIs
 	'gh pr view 123',
 	'gh pr list --state open',
 	'gh issue list --state open',
@@ -128,7 +119,6 @@ const MUST_NOT_FLAG = [
 	'gh repo view',
 	'glab mr list',
 	'glab mr view 5',
-	// ordinary dev commands
 	'npm test',
 	'npm install lodash',
 	'npm run build',
@@ -136,6 +126,13 @@ const MUST_NOT_FLAG = [
 	'cargo test',
 	'mvn -q compile',
 	'./gradlew test',
+	'gradle publishToMavenLocal',
+	'aws s3 ls s3://bucket',
+	'aws ec2 describe-instances',
+	'aws sts get-caller-identity',
+	'gcloud compute instances list',
+	'gcloud config list',
+	'gcloud projects describe project-id',
 	'kubectl get pods',
 	'kubectl logs deploy/web',
 	'terraform plan',
@@ -146,7 +143,6 @@ const MUST_NOT_FLAG = [
 	'docker run --rm img',
 	'curl -s https://api.github.com/repos/o/r',
 	'wget -qO- https://example.com/page.html',
-	// word-boundary traps: substring matches must not fire
 	'git pushg remote',
 	'cat notes/git-push.md',
 	'echo pushing forward',
@@ -184,6 +180,10 @@ test('rules are well-formed regexes with a reason', () => {
 		assert.ok(r.re instanceof RegExp, `not a RegExp: ${r.why}`);
 		assert.ok(r.why && r.why.length > 5, `rule missing why: ${r.re.source}`);
 	}
+});
+
+test('guard covers Pi shell tools', () => {
+	assert.match(source, /new Set\(\["bash", "powershell", "exec", "shell", "run_command"\]\)/);
 });
 
 if (require.main === module) {

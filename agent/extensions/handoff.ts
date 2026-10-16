@@ -1,5 +1,3 @@
-/** Pi's handoff example with compaction-aware history and model fallback. */
-
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { type Message, uuidv7 } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
@@ -91,7 +89,6 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			// Retain the built-in compaction summary and its kept tail.
 			const messages = getHandoffMessages(ctx.sessionManager.getBranch());
 
 			if (messages.length === 0) {
@@ -177,7 +174,6 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			// The original context is stale after session replacement.
 			const newSessionResult = await ctx.newSession({
 				parentSession: currentSessionFile,
 				withSession: async (replacementCtx) => {

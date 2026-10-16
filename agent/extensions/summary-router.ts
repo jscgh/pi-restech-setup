@@ -1,8 +1,7 @@
-import { uuidv7 } from "@earendil-works/pi-ai";
+import { type Api, type Model, uuidv7 } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 
-/** Pi's custom-compaction example with built-in prompts, model fallback, retries, and watchdogs. */
 const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.
 
 Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;
@@ -96,10 +95,10 @@ Create a concise checkpoint of the user's request and the progress shown above. 
 
 Only summarize information explicitly present above. Do not infer or recreate later messages.`;
 
-const HISTORY_MAX_TOKENS = 13107; // floor(0.8 * 16384 default reserveTokens)
-const TURN_PREFIX_MAX_TOKENS = 8192; // floor(0.5 * 16384)
-const FIRST_LIFE_TIMEOUT_MS = 45_000; // fail fast when the model shows no sign of life
-const ATTEMPT_DEADLINE_MS = 420_000; // overall cap once generation has started
+const HISTORY_MAX_TOKENS = 13107;
+const TURN_PREFIX_MAX_TOKENS = 8192;
+const FIRST_LIFE_TIMEOUT_MS = 45_000;
+const ATTEMPT_DEADLINE_MS = 420_000;
 const MAX_ATTEMPTS_PER_RUNG = 2;
 const RETRY_BACKOFF_MS = 2_000;
 const RETRYABLE_ERROR_RE =
@@ -113,12 +112,7 @@ const DEFAULT_CHAIN = [
 
 type ChainRef = readonly [provider: string, modelId: string];
 
-interface ChainModel {
-	provider: string;
-	id: string;
-	maxTokens: number;
-	reasoning: boolean;
-}
+type ChainModel = Model<Api>;
 
 export interface ChainRegistryLike<T extends ChainModel = ChainModel> {
 	find(provider: string, modelId: string): T | undefined;
@@ -177,7 +171,7 @@ function resolveChainTargets<T extends ChainModel>(
 			continue;
 		}
 		const key = `${model.provider}/${model.id}`;
-		if (attempted.has(key)) continue; // dedup rungs that repeat an already-attempted model
+		if (attempted.has(key)) continue;
 		attempted.add(key);
 		targets.push(model);
 	}
@@ -290,7 +284,6 @@ export default function (pi: ExtensionAPI) {
 		const textOf = (message: { content: ReadonlyArray<{ type: string; text?: string }> }): string =>
 			message.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
 
-		// Bound both an unresponsive stream and total generation time.
 		async function requestSummary(model: ChainModel, promptText: string, maxTokens: number): Promise<AttemptOutcome> {
 			const watchdog = new AbortController();
 			const options = {
@@ -319,7 +312,7 @@ export default function (pi: ExtensionAPI) {
 				let sawLife = false;
 				for await (const streamEvent of stream) {
 					if (sawLife || streamEvent.type === "start") continue;
-					sawLife = true; // first sign of life: swap the first-life watchdog for the overall cap
+					sawLife = true;
 					clearTimeout(timer);
 					timer = setTimeout(
 						() => fire(`summary generation exceeded ${ATTEMPT_DEADLINE_MS / 1000}s (timeout)`),
