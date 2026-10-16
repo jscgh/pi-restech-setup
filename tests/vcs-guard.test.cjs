@@ -113,6 +113,7 @@ const MUST_NOT_FLAG = [
 	'git checkout -b feature/create-thing',
 	'git branch -d old-topic',
 	'git stash && git stash pop',
+	'git stash push -m checkpoint',
 	'git rebase -i HEAD~3',
 	'git reset --soft HEAD~1',
 	'git cherry-pick abc123',

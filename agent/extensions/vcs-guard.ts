@@ -13,7 +13,7 @@ const STAY = "[^\\n;|&]*?";
 type Rule = { re: RegExp; why: string };
 
 const RULES: Rule[] = [
-	{ re: new RegExp(`${tok("git")}${STAY}${tok("push")}`), why: "git push writes to the remote" },
+	{ re: new RegExp(`${tok("git")}${ARG}${tok("push")}`), why: "git push writes to the remote" },
 	{ re: new RegExp(`${tok("git")}${STAY}${tok("send-email")}`), why: "git send-email publishes patches" },
 	{ re: new RegExp(`${tok("git")}${STAY}${tok("filter-branch")}`), why: "git filter-branch rewrites history" },
 	{ re: new RegExp(`${tok("git")}${STAY}${tok("cvsexportcommit")}`), why: "git cvsexportcommit publishes" },
