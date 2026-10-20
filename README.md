@@ -45,7 +45,7 @@ Installation can:
 - copy shared files to `~/.pi/agent/`, materialize the private API base URL in `models.json`, and back up changed destinations under `.backup-<timestamp>/`
 - merge `AGENTS.md` template changes while preserving local edits
 - install or update `npm:@tintinweb/pi-subagents`
-- update Pi and installed packages unless disabled
+- update Pi, model catalogs, and installed packages unless disabled
 - run a live ResTech smoke test from a temporary directory under `~/.cache/pi-restech-setup/`
 
 The Katana profile is selected automatically on `katana`, `katana1`–`katana3`, `kdm`, and three-digit compute hosts such as `k123`. It installs `APPEND_SYSTEM.md`, `prompts/nf-test-lanes.md`, and `references/katana-jobs.md`. Other hosts receive only the shared configuration.
@@ -88,7 +88,7 @@ Compaction tries `restech/qwen3.8-flash-next`, then `openai-codex/gpt-5.6-luna`,
 
 GLM agents use `low`, Qwen workers and reviewers use `high`, and bounded exploration uses `low`. The configured endpoint accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Change the current level with `/thinking`.
 
-OpenAI Codex models are optional and require separate access. Luna is used by `worker-luna`; Sol is used for frontier architecture and review; Terra is enabled for manual selection.
+OpenAI Codex models are optional and require separate access. The configured account currently supports GPT-5.6 Luna/Sol/Terra and GPT-6 Luna/Sol. Luna is used by `worker-luna`; Sol is used for frontier architecture and review; Terra is enabled for manual selection.
 
 See [MODEL-BENCHMARK.md](MODEL-BENCHMARK.md) for the evaluation method, replication, limitations, and rationale behind these defaults.
 

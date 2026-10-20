@@ -527,6 +527,9 @@ fi
 
 
 if [ "$MODE" = "install" ]; then
+  log "Refreshing Pi model catalogs..."
+  pi update --models || warn "Could not refresh Pi model catalogs."
+
   log "Installing/updating pi-subagents (latest release)..."
   if ! pi install npm:@tintinweb/pi-subagents; then
     warn "Could not install/update pi-subagents (offline?). Continuing with whatever is installed."
