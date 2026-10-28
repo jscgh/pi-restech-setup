@@ -55,3 +55,5 @@ feature branch: go ahead, no approval needed. The line is at the network boundar
 
 Delegate only genuinely long operations whose benefit exceeds the added
 overhead; do not spawn an agent for a single read or a one-line edit.
+Afterward, integrate or discard its changes and remove temporary worktrees and
+branches unless I explicitly ask to keep them.
