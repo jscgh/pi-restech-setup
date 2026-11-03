@@ -72,3 +72,31 @@ REPLACEMENT="sk-replaced_'\$&456"
 printf '"%s"\n' "$REPLACEMENT" | run_installer --force-key --profile default --no-validate --no-update-pi --no-update-packages >/dev/null
 [ "$(bash -c '. "$1"; printf "%s" "$RESTECH_API_KEY"' _ "$TEMP/home/.pi/.env")" = "$REPLACEMENT" ]
 run_installer --check --profile default >/dev/null
+node - "$TEMP/home/.pi/agent/settings.json" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+settings.defaultProvider = 'openai-codex';
+settings.defaultModel = 'gpt-6-luna';
+settings.enabledModels = ['openai-codex/gpt-6-luna', 'restech/qwen3.8-27b', 'sbf/glm-5.3-flash'];
+settings.modelThinkingLevels['restech/qwen3.8-27b'] = 'low';
+settings.modelThinkingLevels['custom/model'] = 'max';
+settings.theme = 'light';
+fs.writeFileSync(file, JSON.stringify(settings));
+NODE
+run_installer --profile default --no-validate --no-update-pi --no-update-packages -n > "$TEMP/changes.log"
+grep -Fq 'Settings update' "$TEMP/changes.log"
+grep -Fq 'default provider/model: openai-codex gpt-6-luna -> restech glm-5.3-flash' "$TEMP/changes.log"
+[ "$(grep -cF 'enabled models and thinking levels:' "$TEMP/changes.log")" = 1 ]
+grep -Fq '+ restech/glm-5.3-flash (thinking: low)' "$TEMP/changes.log"
+grep -Fq -- '- sbf/glm-5.3-flash' "$TEMP/changes.log"
+grep -Fq '~ restech/qwen3.8-27b: thinking low -> high' "$TEMP/changes.log"
+[ "$(node -p 'require(process.argv[1]).defaultModel' "$TEMP/home/.pi/agent/settings.json")" = gpt-6-luna ]
+run_installer --profile default --no-validate --no-update-pi --no-update-packages -y >/dev/null
+[ "$(node -p 'require(process.argv[1]).defaultModel' "$TEMP/home/.pi/agent/settings.json")" = glm-5.3-flash ]
+[ "$(node -p 'require(process.argv[1]).defaultProvider' "$TEMP/home/.pi/agent/settings.json")" = restech ]
+[ "$(node -p 'require(process.argv[1]).theme' "$TEMP/home/.pi/agent/settings.json")" = dark ]
+[ "$(node -p 'require(process.argv[1]).modelThinkingLevels["custom/model"]' "$TEMP/home/.pi/agent/settings.json")" = max ]
+[ "$(node -p 'require(process.argv[1]).modelThinkingLevels["restech/qwen3.8-27b"]' "$TEMP/home/.pi/agent/settings.json")" = high ]
+[ "$(node -p 'require(process.argv[1]).modelThinkingLevels["sbf/glm-5.3-flash"]' "$TEMP/home/.pi/agent/settings.json")" = undefined ]
+[ "$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).defaultModel' "$TEMP/home/.pi/agent/settings.json.bak")" = gpt-6-luna ]

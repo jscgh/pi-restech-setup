@@ -16,7 +16,7 @@ Shared [Pi](https://github.com/earendil-works/pi) configuration for the UNSW Res
 | `profiles/katana/` | Katana instructions, prompts, and public reference material |
 | `MODEL-BENCHMARK.md` | Initial benchmark and replicated comparison used to select defaults |
 
-Several extensions are adapted from Pi examples. See [NOTICE.md](NOTICE.md) and [LICENSES/pi-MIT.txt](LICENSES/pi-MIT.txt).
+Several extensions are adapted from Pi examples. See [NOTICE.md](NOTICE.md).
 
 ## Requirements
 
@@ -40,7 +40,7 @@ On the first installation, set `RESTECH_API_BASE_URL` to the private API base UR
 Installation can:
 
 - validate the key and write it to `~/.pi/.env` with mode `600`
-- add a marked loader block to the active shell startup file and enable lightweight Bash completion in interactive Bash shells
+- add a marked loader block to the active shell startup file and enable completion for interactive Bash or zsh shells
 - make `~/.profile` source `~/.bashrc` when needed for Bash login shells
 - copy shared files to `~/.pi/agent/`, materialize the private API base URL in `models.json`, and back up changed destinations under `.backup-<timestamp>/`
 - merge `AGENTS.md` template changes while preserving local edits
@@ -50,7 +50,7 @@ Installation can:
 
 The Katana profile is selected automatically on `katana`, `katana1`–`katana3`, `kdm`, and three-digit compute hosts such as `k123`. It installs `APPEND_SYSTEM.md`, `prompts/nf-test-lanes.md`, and `references/katana-jobs.md`. Other hosts receive only the shared configuration.
 
-`settings.json` becomes user-owned after its first installation. `AGENTS.md` is maintained through a recorded merge base under `~/.pi/agent/.pi-restech-setup/`. `PI_SETUP_PERSONAL_FILES` changes which files receive this preservation treatment and should be changed only deliberately.
+`settings.json` is preserved on subsequent installs: the installer highlights each proposed change with a distinct heading, grouping provider/model into one decision and enabled models plus per-model thinking levels into another (default: no). Use `-y` to accept all differing settings, or `-n` to keep them all without prompts. In noninteractive runs, the installer keeps existing values unless `-y` is supplied. Accepted changes back up the previous settings to `settings.json.bak`; Unrelated custom settings remain untouched; accepting the model group removes thinking-level entries for models removed from the enabled list. `AGENTS.md` is maintained through a recorded merge base under `~/.pi/agent/.pi-restech-setup/`. `PI_SETUP_PERSONAL_FILES` changes which files receive this preservation treatment and should be changed only deliberately.
 
 Useful options:
 
@@ -62,9 +62,11 @@ Useful options:
 ./install.sh --no-validate         # skip live key validation and the model smoke test
 ./install.sh --no-update-pi        # keep the installed Pi version
 ./install.sh --no-update-packages  # skip package updates
+./install.sh -y                    # accept differing settings from the template
+./install.sh -n                    # keep existing settings without prompting
 ```
 
-The installer is safe to rerun with the same options: unchanged files are left alone, changed shared files are backed up before replacement, and personal files are preserved or merged. Package updates, live checks, and shell/configuration checks still run on each invocation unless disabled.
+The installer is safe to rerun with the same options: unchanged files are left alone, changed shared files are backed up before replacement, and settings changes require confirmation (or `-y`). Package updates, live checks, and shell/configuration checks still run on each invocation unless disabled.
 
 ## Usage
 
@@ -138,4 +140,4 @@ Then remove only setup-managed files that you have confirmed contain no local ch
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Adapted Pi example code retains its upstream MIT notice in [LICENSES/pi-MIT.txt](LICENSES/pi-MIT.txt).
+MIT. See [LICENSE](LICENSE). The upstream notice for adapted Pi examples is in [NOTICE.md](NOTICE.md).

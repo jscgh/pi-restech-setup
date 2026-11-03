@@ -22,6 +22,7 @@ FORCE_KEY=0
 VALIDATE=1
 UPDATE_PI=1
 UPDATE_PACKAGES=1
+ANSWER_MODE="ask"
 PROFILE="${PI_SETUP_PROFILE:-auto}"
 [ "${PI_SETUP_NO_UPDATE_PI:-}" = "1" ] && UPDATE_PI=0
 [ "${PI_SETUP_NO_UPDATE_PACKAGES:-}" = "1" ] && UPDATE_PACKAGES=0
@@ -36,6 +37,8 @@ Usage: ./install.sh [options]
   --no-validate         Skip the live model check
   --no-update-pi        Keep the installed Pi version
   --no-update-packages  Skip package updates
+  -y, --yes            Accept updates to existing personal settings
+  -n, --no             Keep existing personal settings without prompting
   -h, --help            Show this help
 EOF
 }
@@ -50,6 +53,8 @@ while [ $# -gt 0 ]; do
       ;;
     --no-update-pi) UPDATE_PI=0 ;;
     --no-update-packages) UPDATE_PACKAGES=0 ;;
+    -y|--yes) [ "$ANSWER_MODE" != no ] || { echo "Cannot combine -y and -n." >&2; exit 2; }; ANSWER_MODE=yes ;;
+    -n|--no) [ "$ANSWER_MODE" != yes ] || { echo "Cannot combine -y and -n." >&2; exit 2; }; ANSWER_MODE=no ;;
     --force-key) FORCE_KEY=1 ;;
     --no-validate) VALIDATE=0 ;;
     -h|--help) usage; exit 0 ;;
@@ -496,6 +501,115 @@ install_agents_file() {
   rm -f "$tmp"
 }
 
+update_personal_settings() {
+  local src="$REPO_DIR/agent/settings.json" dst="$PI_AGENT_DIR/settings.json"
+  local key old new answer changed=0 label heading_color='' heading_reset='' removed_color='' added_color=''
+  if [ -t 1 ]; then
+    heading_color=$'\033[1;36m'; heading_reset=$'\033[0m'
+    removed_color=$'\033[31m'; added_color=$'\033[32m'
+  fi
+  node -e 'const fs=require("node:fs"); for (const file of process.argv.slice(1)) JSON.parse(fs.readFileSync(file,"utf8"))' "$src" "$dst" || die "Cannot parse settings.json."
+  while IFS=$'\t' read -r key old new; do
+    [ -n "$key" ] || continue
+    printf '%sSettings update%s\n' "$heading_color" "$heading_reset"
+    case "$key" in
+      default)
+        label="default provider/model"
+        printf '  %s: %s%s%s -> %s%s%s\n' "$label" "$removed_color" "$old" "$heading_reset" "$added_color" "$new" "$heading_reset"
+        ;;
+      models)
+        label="enabled models and thinking levels"
+        printf '  %s:\n' "$label"
+        node - "$old" "$new" <<'NODE'
+const [old, next] = process.argv.slice(2).map(JSON.parse);
+const colour = (code, line) => process.stdout.isTTY ? `\x1b[${code}m${line}\x1b[0m` : line;
+for (const model of old.enabledModels.filter(model => !next.enabledModels.includes(model))) {
+  console.log(colour(31, `    - ${model} (thinking: ${old.modelThinkingLevels?.[model] ?? 'default'})`));
+}
+for (const model of next.enabledModels.filter(model => !old.enabledModels.includes(model))) {
+  console.log(colour(32, `    + ${model} (thinking: ${next.modelThinkingLevels?.[model] ?? 'default'})`));
+}
+for (const model of next.enabledModels.filter(model => old.enabledModels.includes(model))) {
+  const before = old.modelThinkingLevels?.[model] ?? 'default';
+  const after = next.modelThinkingLevels?.[model] ?? 'default';
+  if (before !== after) console.log(colour(33, `    ~ ${model}: thinking ${before} -> ${after}`));
+}
+if (old.enabledModels.length === next.enabledModels.length && old.enabledModels.every(model => next.enabledModels.includes(model)) && JSON.stringify(old.enabledModels) !== JSON.stringify(next.enabledModels)) console.log(colour(33, '    ~ model order changed'));
+NODE
+        ;;
+      *)
+        label="$key"
+        printf '  %s: %s%s%s -> %s%s%s\n' "$label" "$removed_color" "$old" "$heading_reset" "$added_color" "$new" "$heading_reset"
+        ;;
+    esac
+
+    case "$ANSWER_MODE" in
+      yes) answer=y ;;
+      no) answer=n ;;
+      *)
+        if [ -r /dev/tty ]; then
+          printf 'Update settings.json %s with the recommended template? [y/N] ' "$label" > /dev/tty
+          IFS= read -r answer < /dev/tty || answer=n
+        else
+          answer=n
+          warn "No terminal for settings prompt; keeping $label (use -y to accept)."
+        fi
+        ;;
+    esac
+    case "$answer" in
+      y|Y|yes|YES)
+        if [ "$changed" = 0 ]; then
+          cp -p "$dst" "$dst.bak"
+          changed=1
+        fi
+        node - "$src" "$dst" "$key" <<'NODE'
+const fs = require('node:fs');
+const [source, destination, key] = process.argv.slice(2);
+const template = JSON.parse(fs.readFileSync(source, 'utf8'));
+const installed = JSON.parse(fs.readFileSync(destination, 'utf8'));
+if (key === 'default') {
+  installed.defaultProvider = template.defaultProvider;
+  installed.defaultModel = template.defaultModel;
+} else if (key === 'models') {
+  const removed = (installed.enabledModels ?? []).filter(model => !template.enabledModels.includes(model));
+  installed.enabledModels = template.enabledModels;
+  installed.modelThinkingLevels ??= {};
+  for (const model of [...removed, ...template.enabledModels]) delete installed.modelThinkingLevels[model];
+  for (const model of template.enabledModels) {
+    if (Object.hasOwn(template.modelThinkingLevels ?? {}, model)) installed.modelThinkingLevels[model] = template.modelThinkingLevels[model];
+  }
+} else {
+  installed[key] = template[key];
+}
+fs.writeFileSync(destination, `${JSON.stringify(installed, null, 2)}\n`);
+NODE
+        log "Updated settings.json $label (previous file: $dst.bak)."
+        ;;
+      *) log "Kept settings.json $label." ;;
+    esac
+  done < <(node - "$src" "$dst" <<'NODE'
+const fs = require('node:fs');
+const [source, destination] = process.argv.slice(2);
+const template = JSON.parse(fs.readFileSync(source, 'utf8'));
+const installed = JSON.parse(fs.readFileSync(destination, 'utf8'));
+const display = value => JSON.stringify(value) ?? '(missing)';
+const emit = (key, old, next) => console.log([key, old, next].join('\t'));
+const pair = value => `${value.defaultProvider ?? '(missing)'} ${value.defaultModel ?? '(missing)'}`;
+if (pair(template) !== pair(installed)) emit('default', pair(installed), pair(template));
+const models = value => ({enabledModels: value.enabledModels ?? [], modelThinkingLevels: value.modelThinkingLevels ?? {}});
+const oldModels = models(installed);
+const newModels = models(template);
+const modelChanges = JSON.stringify(oldModels.enabledModels) !== JSON.stringify(newModels.enabledModels) ||
+  newModels.enabledModels.some(model => oldModels.modelThinkingLevels[model] !== newModels.modelThinkingLevels[model]);
+if (modelChanges) emit('models', display(oldModels), display(newModels));
+for (const [key, value] of Object.entries(template)) {
+  if (['defaultProvider', 'defaultModel', 'enabledModels', 'modelThinkingLevels'].includes(key)) continue;
+  if (display(value) !== display(installed[key])) emit(key, display(installed[key]), display(value));
+}
+NODE
+  )
+}
+
 install_personal_file() {
   local pf_rel="$1" src dst
   [ -n "$pf_rel" ] || return 0
@@ -511,6 +625,8 @@ install_personal_file() {
     log "Installed $pf_rel (first time; now yours to keep)."
   elif cmp -s "$src" "$dst"; then
     log "$pf_rel unchanged."
+  elif [ "$pf_rel" = settings.json ]; then
+    update_personal_settings
   else
     [ -f "$dst.bak" ] || cp -p "$dst" "$dst.bak" 2>/dev/null || true
     log "$pf_rel differs from the template -> kept yours. See: diff '$REPO_DIR/agent/$pf_rel' '$dst'"
