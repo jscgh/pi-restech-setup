@@ -6,6 +6,7 @@
     "npm:@tintinweb/pi-subagents"
   ],
   "enabledModels": [
+    "sbf/glm-5.3-flash",
     "restech/qwen3.8-flash-next",
     "restech/qwen3.8-27b",
     "restech/glm-5.3-flash",
@@ -25,6 +26,7 @@
     "openai-codex/gpt-6-sol": "low",
     "restech/qwen3.8-flash-next": "medium",
     "restech/qwen3.8-27b": "high",
-    "restech/glm-5.3-flash": "low"
+    "restech/glm-5.3-flash": "low",
+    "sbf/glm-5.3-flash": "low"
   }
 }

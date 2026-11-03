@@ -59,6 +59,49 @@
           }
         }
       ]
-    }
+    },
+    "sbf": {
+      "name": "(sbf) local inference",
+      "baseUrl": "http://127.0.0.1:11439/v1",
+      "api": "openai-completions",
+      "apiKey": "local-tunnel",
+      "models": [
+            {
+                  "id": "glm-5.3-flash",
+                  "name": "(sbf) GLM-5.3-Flash",
+                  "reasoning": true,
+                  "input": [
+                        "text"
+                  ],
+                  "cost": {
+                        "input": 0,
+                        "output": 0,
+                        "cacheRead": 0,
+                        "cacheWrite": 0
+                  },
+                  "contextWindow": 409600,
+                  "maxTokens": 32768,
+                  "thinkingLevelMap": {
+                        "off": null,
+                        "minimal": "low",
+                        "low": "low",
+                        "medium": "high",
+                        "high": "high",
+                        "xhigh": "max",
+                        "max": "max"
+                  },
+                  "compat": {
+                        "supportsReasoningEffort": true,
+                        "thinkingFormat": "openai",
+                        "maxTokensField": "max_tokens"
+                  },
+                  "samplingParams": {
+                        "chat_template_kwargs": {
+                              "clear_thinking": true
+                        }
+                  }
+            }
+      ]
+}
   }
 }

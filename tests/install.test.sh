@@ -44,6 +44,29 @@ grep -Fq '"baseUrl": "https://example.invalid/v1"' "$TEMP/home/.pi/agent/models.
 grep -Fq '"baseUrl": "__RESTECH_API_BASE_URL__"' "$ROOT/agent/models.json"
 run_installer_without_url --profile default --no-validate --no-update-pi --no-update-packages >/dev/null
 run_installer_without_url --check --profile default >/dev/null
+cmp -s "$ROOT/completions/pi.bash" "$TEMP/home/.pi/agent/completions/pi.bash"
+[ "$(grep -cF 'completions/pi.bash' "$TEMP/home/.bashrc")" = 1 ]
+sed -i '/completions\/pi.bash/d' "$TEMP/home/.bashrc"
+printf '[[ $- == *i* && -f %s ]] && . %s\n' "$TEMP/home/.pi/agent/completions/pi.bash" "$TEMP/home/.pi/agent/completions/pi.bash" >> "$TEMP/home/.bashrc"
+run_installer_without_url --profile default --no-validate --no-update-pi --no-update-packages >/dev/null
+[ "$(grep -cF 'completions/pi.bash' "$TEMP/home/.bashrc")" = 1 ]
+bash -c 'source "$1"; COMP_WORDS=(pi update --ext); COMP_CWORD=2; _pi_restech_setup_complete; [[ " ${COMPREPLY[*]} " == *" --extensions "* ]]' _ "$TEMP/home/.pi/agent/completions/pi.bash"
+HOME="$TEMP/home" bash --noprofile --rcfile "$TEMP/home/.bashrc" -ic 'complete -p pi' >/dev/null 2>&1
+node - "$TEMP/home/.bashrc" <<'NODE'
+const fs = require('node:fs');
+const contents = fs.readFileSync(process.argv[2], 'utf8');
+const start = contents.indexOf('# >>> pi-restech-setup >>>');
+const end = contents.indexOf('# <<< pi-restech-setup <<<');
+const loader = contents.indexOf('completions/pi.bash');
+if (!(start < loader && loader < end)) process.exit(1);
+NODE
+mkdir -p "$TEMP/zhome"
+env -i HOME="$TEMP/zhome" PATH="$TEMP/bin:$PATH" SHELL=/bin/zsh PI_SETUP_REPO_DIR="$ROOT" PI_CODING_AGENT_DIR="$TEMP/zhome/.pi/agent" RESTECH_API_BASE_URL=https://example.invalid/v1 RESTECH_API_KEY=sk-test bash "$ROOT/install.sh" --profile default --no-validate --no-update-pi --no-update-packages >/dev/null
+cmp -s "$ROOT/completions/pi.zsh" "$TEMP/zhome/.pi/agent/completions/pi.zsh"
+grep -Fq 'completions/pi.zsh' "$TEMP/zhome/.zshrc"
+if command -v zsh >/dev/null; then
+  HOME="$TEMP/zhome" zsh -ic '(( $+functions[_pi_restech_setup_complete] ))' >/dev/null
+fi
 
 REPLACEMENT="sk-replaced_'\$&456"
 printf '"%s"\n' "$REPLACEMENT" | run_installer --force-key --profile default --no-validate --no-update-pi --no-update-packages >/dev/null

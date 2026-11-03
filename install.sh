@@ -293,20 +293,49 @@ INIT_FILE="$(shell_init_files)"
 log "Shell init file: $INIT_FILE"
 
 if [ "$MODE" = "install" ]; then
-  if ! grep -qF "$MARKER_BEGIN" "$INIT_FILE" 2>/dev/null; then
-    {
-      printf '\n%s\n' "$MARKER_BEGIN"
-      printf '# Loads the ResTech API key for pi and the documented curl quickstarts.\n'
-      printf '# Managed by pi-restech-setup install.sh - safe to edit, keep the markers.\n'
-      printf '[ -f "$HOME/.pi/.env" ] && . "$HOME/.pi/.env"\n'
-      printf '%s\n' "$MARKER_END"
-    } >> "$INIT_FILE"
-    log "Appended source block to $INIT_FILE."
+  SHELL_KIND="$(detect_user_shell)"
+  if [ "$SHELL_KIND" = bash ] || [ "$SHELL_KIND" = zsh ]; then
+    COMPLETION_FILE="$PI_AGENT_DIR/completions/pi.$SHELL_KIND"
+    mkdir -p "$(dirname "$COMPLETION_FILE")"
+    if ! cmp -s "$REPO_DIR/completions/pi.$SHELL_KIND" "$COMPLETION_FILE"; then
+      if [ -f "$COMPLETION_FILE" ]; then
+        mkdir -p "$PI_AGENT_DIR/.backup-$STAMP/completions"
+        cp -p "$COMPLETION_FILE" "$PI_AGENT_DIR/.backup-$STAMP/completions/pi.$SHELL_KIND"
+      fi
+      cp -p "$REPO_DIR/completions/pi.$SHELL_KIND" "$COMPLETION_FILE"
+    fi
+    if [ "$SHELL_KIND" = bash ]; then
+      printf -v COMPLETION_LOADER '[[ $- == *i* && -f %q ]] && . %q' "$COMPLETION_FILE" "$COMPLETION_FILE"
+    else
+      printf -v COMPLETION_LOADER '[[ -o interactive && -f %q ]] && . %q' "$COMPLETION_FILE" "$COMPLETION_FILE"
+    fi
   else
-    log "Source block already present in $INIT_FILE - left as-is."
+    COMPLETION_LOADER=""
   fi
-
-  if [ "$(detect_user_shell)" = bash ]; then
+  INIT_FILE="$INIT_FILE" MARKER_BEGIN="$MARKER_BEGIN" MARKER_END="$MARKER_END" COMPLETION_LOADER="$COMPLETION_LOADER" node <<'NODE'
+const fs = require('node:fs');
+const file = process.env.INIT_FILE;
+const begin = process.env.MARKER_BEGIN;
+const end = process.env.MARKER_END;
+const loader = process.env.COMPLETION_LOADER;
+let content = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+const original = content;
+if (!content.includes(begin)) {
+  content += `\n${begin}\n[ -f "$HOME/.pi/.env" ] && . "$HOME/.pi/.env"\n${end}\n`;
+}
+const lines = content.split('\n');
+const start = lines.findIndex(line => line === begin);
+const finish = lines.findIndex((line, i) => i > start && line === end);
+if (finish < 0) throw new Error(`Missing shell block end marker in ${file}`);
+const old = lines.findIndex((line, i) => i > finish && line === loader);
+if (old >= 0) lines.splice(old, 1);
+if (loader && !lines.slice(start + 1, finish).includes(loader)) {
+  lines.splice(finish, 0, loader);
+}
+const next = lines.join('\n');
+if (next !== original) fs.writeFileSync(file, next);
+NODE
+  if [ "$SHELL_KIND" = bash ]; then
     SHELL_PROFILE="$HOME/.profile"
     if [ -f "$SHELL_PROFILE" ] && ! grep -qE "bashrc" "$SHELL_PROFILE" 2>/dev/null; then
       printf '\nif [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n' >> "$SHELL_PROFILE"

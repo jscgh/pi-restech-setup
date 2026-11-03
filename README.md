@@ -40,7 +40,7 @@ On the first installation, set `RESTECH_API_BASE_URL` to the private API base UR
 Installation can:
 
 - validate the key and write it to `~/.pi/.env` with mode `600`
-- add a marked loader block to the active shell startup file
+- add a marked loader block to the active shell startup file and enable lightweight Bash completion in interactive Bash shells
 - make `~/.profile` source `~/.bashrc` when needed for Bash login shells
 - copy shared files to `~/.pi/agent/`, materialize the private API base URL in `models.json`, and back up changed destinations under `.backup-<timestamp>/`
 - merge `AGENTS.md` template changes while preserving local edits
@@ -75,6 +75,8 @@ pi --model restech/glm-5.3-flash
 ```
 
 The configured default is `restech/glm-5.3-flash` at `low` thinking. Tool output is rendered compactly, `/agents` lists named subagents, and `/handoff <goal>` starts a focused child session with an editable prompt.
+
+The installer copies the Bash or zsh completion file to `~/.pi/agent/completions/` and loads it from the managed block in `~/.bashrc` or `~/.zshrc` for interactive shells. Completion is static and includes `pi update --extensions`; zsh initializes its completion system only if it is not already initialized. Open a new shell to use it.
 
 Compaction tries `restech/qwen3.8-flash-next`, then `openai-codex/gpt-5.6-luna`, then the active model. Unavailable providers are skipped. Override the chain with comma-separated `PI_COMPACT_MODELS` entries.
 
@@ -132,7 +134,7 @@ Remove the subagent package with:
 pi remove npm:@tintinweb/pi-subagents
 ```
 
-Then remove only setup-managed files that you have confirmed contain no local changes, including the extensions, agent definitions, prompts, `models.json`, `subagents.json`, and any installed Katana profile files. Treat `settings.json` and `AGENTS.md` as personal files. Remove the marked shell block, `~/.pi/agent/.pi-restech-setup/`, and `~/.pi/.env` only if they are no longer needed.
+Then remove only setup-managed files that you have confirmed contain no local changes, including the extensions, agent definitions, prompts, `models.json`, `subagents.json`, and any installed Katana profile files. Treat `settings.json` and `AGENTS.md` as personal files. Remove the marked shell block, `~/.pi/agent/completions/`, `~/.pi/agent/.pi-restech-setup/`, and `~/.pi/.env` only if they are no longer needed.
 
 ## License
 
