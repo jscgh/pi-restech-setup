@@ -97,7 +97,6 @@ export default function (pi: ExtensionAPI) {
 						},
 						{
 							maxTokens: 1_024,
-							reasoning: model.reasoning ? "minimal" : undefined,
 							cacheRetention: "none",
 							sessionId: uuidv7(),
 						},
