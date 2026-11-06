@@ -124,7 +124,7 @@ if [ "$MODE" = "install" ]; then
   case "$BASE_URL" in
     *[[:space:]]*|*[[:cntrl:]]*) die "The API base URL must not contain whitespace or control characters." ;;
     https://*) : ;;
-    *) die "The API base URL must use HTTPS." ;;
+    *) die "The API base URL must use HTTPS (for example, https://api.example.com/v1). Set ${BASE_URL_ENV_NAME} or update providers.restech.baseUrl in $PI_AGENT_DIR/models.json." ;;
   esac
 fi
 
