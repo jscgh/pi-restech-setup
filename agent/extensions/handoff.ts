@@ -79,7 +79,7 @@ export default function (pi: ExtensionAPI) {
 
 			const summaryModels = [
 				ctx.modelRegistry.find("restech", "qwen3.8-flash-next"),
-				ctx.modelRegistry.find("openai-codex", "gpt-5.6-luna"),
+				ctx.modelRegistry.find("openai-codex", "gpt-6-luna"),
 				ctx.model,
 			];
 
@@ -129,7 +129,7 @@ export default function (pi: ExtensionAPI) {
 								model,
 								{ systemPrompt: SYSTEM_PROMPT, messages: [userMessage] },
 								{
-									reasoning: model.reasoning ? "minimal" : undefined,
+									reasoning: model.reasoning ? "low" : undefined,
 									signal: loader.signal,
 									cacheRetention: "none",
 									sessionId: uuidv7(),

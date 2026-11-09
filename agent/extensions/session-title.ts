@@ -4,7 +4,7 @@ import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-wor
 
 const MODEL_CHAIN = [
 	["restech", "qwen3.8-flash-next"],
-	["openai-codex", "gpt-5.6-luna"],
+	["openai-codex", "gpt-6-luna"],
 	["current", ""],
 ] as const;
 const MAX_SOURCE_CHARS = 2_000;

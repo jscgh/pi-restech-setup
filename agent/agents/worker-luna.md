@@ -1,6 +1,6 @@
 ---
 description: Frontier implementation worker using Luna in an isolated worktree
-model: openai-codex/gpt-5.6-luna
+model: openai-codex/gpt-6-luna
 thinking: low
 tools: read, bash, edit, write, grep, find, ls
 max_turns: 0

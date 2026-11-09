@@ -1,7 +1,7 @@
 ---
 description: Explicit GPT-5.6 Sol final review for high-risk changes
 tools: read, bash, grep, find, ls
-model: openai-codex/gpt-5.6-sol
+model: openai-codex/gpt-6-sol
 max_turns: 100
 prompt_mode: replace
 extensions: false

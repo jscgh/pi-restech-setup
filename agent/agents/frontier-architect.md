@@ -1,7 +1,7 @@
 ---
 description: Explicit frontier-model escalation for difficult architecture and debugging
 tools: read, bash, grep, find, ls
-model: openai-codex/gpt-5.6-sol
+model: openai-codex/gpt-6-sol
 max_turns: 100
 prompt_mode: replace
 extensions: false
