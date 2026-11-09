@@ -1,4 +1,5 @@
 {
+  "rememberAgents": false,
   "maxConcurrent": 3,
   "defaultMaxTurns": 0,
   "graceTurns": 5,
