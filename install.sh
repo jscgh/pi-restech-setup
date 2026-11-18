@@ -643,6 +643,17 @@ if [ "$MODE" = "install" ]; then
     copy_tree "$PROFILE_DIR" "$PI_AGENT_DIR"
     log "Applied host profile: $PROFILE"
   fi
+  legacy_title="$PI_AGENT_DIR/extensions/session-title.ts"
+  if [ -f "$legacy_title" ]; then
+    if grep -Fq 'const MODEL_CHAIN = [' "$legacy_title" && grep -Fq 'session-title-error' "$legacy_title"; then
+      mkdir -p "$PI_AGENT_DIR/.backup-$STAMP/extensions"
+      cp -p "$legacy_title" "$PI_AGENT_DIR/.backup-$STAMP/extensions/session-title.ts"
+      rm -- "$legacy_title"
+      log "Removed legacy session-title.ts (backup: $PI_AGENT_DIR/.backup-$STAMP/extensions/session-title.ts)."
+    else
+      warn "Unknown session-title.ts at $legacy_title; remove it manually to avoid competing title generators."
+    fi
+  fi
   log "Config installed into $PI_AGENT_DIR"
 fi
 
@@ -678,6 +689,10 @@ if [ "$MODE" = "install" ]; then
   log "Installing/updating pi-subagents (latest release)..."
   if ! pi install npm:@tintinweb/pi-subagents; then
     warn "Could not install/update pi-subagents (offline?). Continuing with whatever is installed."
+  fi
+  log "Installing/updating pi-auto-session-titles..."
+  if ! pi install git:github.com/edxeth/pi-auto-session-titles; then
+    warn "Could not install/update pi-auto-session-titles (offline?). Continuing with whatever is installed."
   fi
 
   if pi list 2>/dev/null | grep -qF "$REPO_DIR"; then

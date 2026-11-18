@@ -42,7 +42,15 @@ printf '"%s"\n' "$KEY" | run_installer --profile default --no-validate --no-upda
 [ "$(stat -c '%a' "$TEMP/home/.pi/.env")" = 600 ]
 grep -Fq '"baseUrl": "https://example.invalid/v1"' "$TEMP/home/.pi/agent/models.json"
 grep -Fq '"baseUrl": "__RESTECH_API_BASE_URL__"' "$ROOT/agent/models.json"
+node - "$TEMP/home/.pi/agent/settings.json" <<'NODE'
+const settings = require(process.argv[2]);
+if (!settings.packages.includes('git:github.com/edxeth/pi-auto-session-titles')) process.exit(1);
+if (settings.autoSessionTitles.provider !== 'restech' || settings.autoSessionTitles.model !== 'qwen3.8-flash-next' || settings.autoSessionTitles.thinkingLevel !== 'minimal') process.exit(1);
+NODE
+printf 'const MODEL_CHAIN = [\nsession-title-error\n' > "$TEMP/home/.pi/agent/extensions/session-title.ts"
 run_installer_without_url --profile default --no-validate --no-update-pi --no-update-packages >/dev/null
+[ ! -e "$TEMP/home/.pi/agent/extensions/session-title.ts" ]
+find "$TEMP/home/.pi/agent" -path '*/.backup-*/extensions/session-title.ts' -exec grep -lF 'session-title-error' {} + | grep -q .
 run_installer_without_url --check --profile default >/dev/null
 cmp -s "$ROOT/completions/pi.bash" "$TEMP/home/.pi/agent/completions/pi.bash"
 [ "$(grep -cF 'completions/pi.bash' "$TEMP/home/.bashrc")" = 1 ]

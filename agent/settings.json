@@ -3,8 +3,15 @@
   "defaultProvider": "restech",
   "defaultModel": "glm-5.3-flash",
   "packages": [
-    "npm:@tintinweb/pi-subagents"
+    "npm:@tintinweb/pi-subagents",
+    "git:github.com/edxeth/pi-auto-session-titles"
   ],
+  "autoSessionTitles": {
+    "enabled": true,
+    "provider": "restech",
+    "model": "qwen3.8-flash-next",
+    "thinkingLevel": "minimal"
+  },
   "enabledModels": [
     "restech/qwen3.8-flash-next",
     "restech/qwen3.8-27b",

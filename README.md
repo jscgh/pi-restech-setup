@@ -7,12 +7,12 @@ Shared [Pi](https://github.com/earendil-works/pi) configuration for the UNSW Res
 | Path | Purpose |
 | --- | --- |
 | `agent/models.json` | ResTech provider and model definitions; the installer materializes the private base URL and the API key is read from `RESTECH_API_KEY` |
-| `agent/settings.json` | Default model, thinking levels, enabled models, and the pi-subagents package |
+| `agent/settings.json` | Default model, thinking levels, enabled models, pi-subagents, and pi-auto-session-titles |
 | `agent/AGENTS.md` | Shared instructions, three-way merged with local edits during installation |
 | `agent/subagents.json` | Subagent concurrency and scheduling settings |
 | `agent/agents/` | Local workers, reviewers, and optional frontier escalation |
 | `agent/prompts/` | Reusable implementation and review prompts |
-| `agent/extensions/` | Compact rendering, notifications, session titles, handoff, compaction routing, and remote-write guarding |
+| `agent/extensions/` | Compact rendering, notifications, handoff, compaction routing, and remote-write guarding |
 | `profiles/katana/` | Katana instructions, prompts, and public reference material |
 | `MODEL-BENCHMARK.md` | Initial benchmark and replicated comparison used to select defaults |
 
@@ -44,7 +44,7 @@ Installation can:
 - make `~/.profile` source `~/.bashrc` when needed for Bash login shells
 - copy shared files to `~/.pi/agent/`, materialize the private API base URL in `models.json`, and back up changed destinations under `.backup-<timestamp>/`
 - merge `AGENTS.md` template changes while preserving local edits
-- install or update `npm:@tintinweb/pi-subagents`
+- install or update `npm:@tintinweb/pi-subagents` and `git:github.com/edxeth/pi-auto-session-titles`
 - update Pi, model catalogs, and installed packages unless disabled
 - run a live ResTech smoke test from a temporary directory under `~/.cache/pi-restech-setup/`
 
@@ -76,7 +76,7 @@ pi --model restech/qwen3.8-27b
 pi --model restech/glm-5.3-flash
 ```
 
-The configured default is `restech/glm-5.3-flash` at `low` thinking. Tool output is rendered compactly, `/agents` lists named subagents, and `/handoff <goal>` starts a focused child session with an editable prompt.
+The configured default is `restech/glm-5.3-flash` at `low` thinking. Tool output is rendered compactly, `/agents` lists named subagents, and `/handoff <goal>` starts a focused child session with an editable prompt. The upstream [pi-auto-session-titles](https://github.com/edxeth/pi-auto-session-titles) extension names new sessions after the first settled request using `restech/qwen3.8-flash-next` at minimal thinking. Use `/rename-session` to regenerate a title or `/name` to set one manually. The previous custom session-title extension is removed on installation; existing session names are not changed.
 
 The installer copies the Bash or zsh completion file to `~/.pi/agent/completions/` and loads it from the managed block in `~/.bashrc` or `~/.zshrc` for interactive shells. Completion is static and includes `pi update --extensions`; zsh initializes its completion system only if it is not already initialized. Open a new shell to use it.
 
@@ -130,10 +130,11 @@ node tests/vcs-guard.test.cjs
 
 The installer does not keep an ownership ledger, so there is no safe blanket removal command. Before removing files, compare them with the checkout and inspect `.backup-<timestamp>/`, `AGENTS.md.bak`, and `settings.json.bak` for local content.
 
-Remove the subagent package with:
+Remove the packages with:
 
 ```bash
 pi remove npm:@tintinweb/pi-subagents
+pi remove git:github.com/edxeth/pi-auto-session-titles
 ```
 
 Then remove only setup-managed files that you have confirmed contain no local changes, including the extensions, agent definitions, prompts, `models.json`, `subagents.json`, and any installed Katana profile files. Treat `settings.json` and `AGENTS.md` as personal files. Remove the marked shell block, `~/.pi/agent/completions/`, `~/.pi/agent/.pi-restech-setup/`, and `~/.pi/.env` only if they are no longer needed.
