@@ -92,7 +92,7 @@ Compaction tries `restech/qwen3.8-flash-next`, then `openai-codex/gpt-5.6-luna`,
 
 GLM agents use `low`, Qwen workers and reviewers use `high`, and bounded exploration uses `low`. The configured endpoint accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Change the current level with `/thinking`.
 
-OpenAI Codex models are optional and require separate access. The configured account currently supports GPT-5.6 Luna/Sol/Terra and GPT-6 Luna/Sol. Luna is used by `worker-luna`; Sol is used for frontier architecture and review; Terra is enabled for manual selection.
+OpenAI Codex models are optional and require separate access. The enabled list includes GPT-5.6 Luna/Sol/Terra, GPT-6 Luna/Astra, and GPT-6.1 Sol/Terra. GPT-5.6 Luna/Sol remain available for comparison; this is not a claim that they outperform newer models. GPT-6 Luna is used by `worker-luna`; GPT-6 Sol remains assigned to frontier architecture and review but is no longer in the enabled cycling list. GPT-6 Astra and GPT-6.1 Sol/Terra are enabled for manual selection.
 
 See [MODEL-BENCHMARK.md](MODEL-BENCHMARK.md) for the evaluation method, replication, limitations, and rationale behind these defaults.
 

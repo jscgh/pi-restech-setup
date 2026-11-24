@@ -80,6 +80,20 @@ REPLACEMENT="sk-replaced_'\$&456"
 printf '"%s"\n' "$REPLACEMENT" | run_installer --force-key --profile default --no-validate --no-update-pi --no-update-packages >/dev/null
 [ "$(bash -c '. "$1"; printf "%s" "$RESTECH_API_KEY"' _ "$TEMP/home/.pi/.env")" = "$REPLACEMENT" ]
 run_installer --check --profile default >/dev/null
+mkdir -p "$TEMP/repo"
+cp -a "$ROOT/." "$TEMP/repo/"
+ROOT="$TEMP/repo"
+node - "$ROOT/agent/settings.json" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+settings.defaultProvider = 'restech';
+settings.defaultModel = 'glm-5.3-flash';
+settings.theme = 'dark';
+settings.enabledModels = ['restech/glm-5.3-flash', 'restech/qwen3.8-27b'];
+settings.modelThinkingLevels = {'restech/glm-5.3-flash': 'low', 'restech/qwen3.8-27b': 'high'};
+fs.writeFileSync(file, JSON.stringify(settings));
+NODE
 node - "$TEMP/home/.pi/agent/settings.json" <<'NODE'
 const fs = require('node:fs');
 const file = process.argv[2];
@@ -87,6 +101,7 @@ const settings = JSON.parse(fs.readFileSync(file, 'utf8'));
 settings.defaultProvider = 'openai-codex';
 settings.defaultModel = 'gpt-6-luna';
 settings.enabledModels = ['openai-codex/gpt-6-luna', 'restech/qwen3.8-27b', 'sbf/glm-5.3-flash'];
+settings.modelThinkingLevels ??= {};
 settings.modelThinkingLevels['restech/qwen3.8-27b'] = 'low';
 settings.modelThinkingLevels['custom/model'] = 'max';
 settings.theme = 'light';
